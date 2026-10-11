@@ -1,0 +1,10 @@
+venv/
+env/
+secrets/
+.env
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+dashboards/*/index.html
+!dashboards/.gitkeep
