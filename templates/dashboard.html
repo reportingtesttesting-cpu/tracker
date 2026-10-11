@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <title>{{ project_name }} — Dashboard</title>
+<script src="https://identity.netlify.com/v1/netlify-identity-widget.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
 <style>
@@ -11,7 +12,6 @@
   --text:#e6edf3;--muted:#8b949e;--accent:#58a6ff;--green:#3fb950;--red:#f85149;
   --orange:#f0883e;--yellow:#d29922;--purple:#a371f7;
   --radius:10px;--radius-sm:6px;
-  --shadow:0 4px 12px rgba(0,0,0,0.5);
 }
 *{box-sizing:border-box}
 html,body{margin:0;padding:0;background:var(--bg);color:var(--text);
@@ -35,6 +35,9 @@ body{padding-bottom:60px}
 .rag.green{background:rgba(63,185,80,0.15);color:var(--green);border:1px solid rgba(63,185,80,0.35)}
 .rag.amber{background:rgba(240,136,62,0.15);color:var(--orange);border:1px solid rgba(240,136,62,0.35)}
 .rag.red{background:rgba(248,81,73,0.15);color:var(--red);border:1px solid rgba(248,81,73,0.35)}
+.iconbtn{background:var(--panel);border:1px solid var(--border);color:var(--text);
+  padding:6px 12px;border-radius:var(--radius-sm);font-size:12px;cursor:pointer;font-family:inherit}
+.iconbtn:hover{border-color:var(--border-strong)}
 .tabs{display:flex;gap:2px;border-bottom:1px solid var(--border);margin-top:14px;overflow-x:auto}
 .tab{padding:10px 16px;font-size:13px;cursor:pointer;color:var(--muted);border:none;background:none;
   font-family:inherit;border-bottom:2px solid transparent;white-space:nowrap}
@@ -74,11 +77,60 @@ table.data .pill{padding:2px 8px;border-radius:999px;font-size:10px;font-weight:
 .empty{color:var(--muted);padding:30px;text-align:center;font-size:13px}
 .footer{margin-top:40px;padding-top:20px;border-top:1px solid var(--border);
   font-size:11px;color:var(--muted);text-align:center}
+.guard{position:fixed;inset:0;background:var(--bg);z-index:9999;display:flex;
+  align-items:center;justify-content:center;flex-direction:column;gap:14px}
+.guard .spin{width:32px;height:32px;border:3px solid var(--border);
+  border-top-color:var(--accent);border-radius:50%;animation:spin 0.8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
 </style>
 </head>
 <body>
 
+<div class="guard" id="guard">
+  <div class="spin"></div>
+  <div style="color:var(--muted);font-size:13px;">Verifying access...</div>
+</div>
+
 <script type="application/json" id="data">{{ data_json | safe }}</script>
+<script>
+const REQUIRED_ROLE = "{{ audience }}";
+
+function getRoles(user) {
+  if (!user) return [];
+  const appRoles = (user.app_metadata && user.app_metadata.roles) || [];
+  const userRoles = (user.user_metadata && user.user_metadata.roles) || [];
+  return appRoles.concat(userRoles);
+}
+
+(function() {
+  if (!window.netlifyIdentity) {
+    window.location.href = "/";
+    return;
+  }
+  window.netlifyIdentity.on("init", user => {
+    if (!user) {
+      window.location.href = "/";
+      return;
+    }
+    const roles = getRoles(user);
+    const isAdmin = roles.indexOf("executive") >= 0;
+    if (REQUIRED_ROLE === "executive") {
+      if (!isAdmin) {
+        window.location.href = "/";
+        return;
+      }
+    } else {
+      if (roles.indexOf(REQUIRED_ROLE) < 0 && !isAdmin) {
+        window.location.href = "/";
+        return;
+      }
+    }
+    document.getElementById("guard").style.display = "none";
+    window.dispatchEvent(new Event("identityReady"));
+  });
+  window.netlifyIdentity.init();
+})();
+</script>
 
 <div class="topbar">
   <div class="wrap">
@@ -91,8 +143,9 @@ table.data .pill{padding:2px 8px;border-radius:999px;font-size:10px;font-weight:
         </div>
       </div>
       <div class="spacer"></div>
-      <div class="person">{{ audience }}</div>
+      <div class="person" id="personLabel">{{ audience }}</div>
       <div class="rag" id="ragBadge">—</div>
+      <button class="iconbtn" onclick="logout()">Log out</button>
     </div>
     <div class="tabs" id="tabs">
       <button class="tab active" data-tab="overview">Overview</button>
@@ -146,281 +199,287 @@ table.data .pill{padding:2px 8px;border-radius:999px;font-size:10px;font-weight:
 </div>
 
 <script>
-const DATA = JSON.parse(document.getElementById('data').textContent);
-let charts = {};
-
-function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
-
-function kpiCard(lbl,val,cls,hint){
-  return `<div class="kpi"><div class="lbl">${lbl}</div><div class="val ${cls||''}">${val}</div>${hint?`<div class="hint">${hint}</div>`:''}</div>`;
+function logout() {
+  if (window.netlifyIdentity) {
+    window.netlifyIdentity.logout().then(() => {
+      window.location.href = "/";
+    });
+  }
 }
 
-function destroyChart(k){if(charts[k]){try{charts[k].destroy();}catch(e){}delete charts[k];}}
+window.addEventListener("identityReady", () => {
+  const DATA = JSON.parse(document.getElementById('data').textContent);
+  const charts = {};
 
-function applyChartDefaults(){
-  if(typeof Chart==='undefined')return;
-  Chart.defaults.color='#e6edf3';
-  Chart.defaults.borderColor='#232a36';
-  Chart.defaults.font.family='-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif';
-  Chart.defaults.font.size=11;
-}
+  function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 
-function renderHeader(){
-  const c=DATA.config||{};
-  document.getElementById('logoInitial').textContent=(c.client||'P').slice(0,2).toUpperCase();
-  const h=(DATA.kpis&&DATA.kpis.health)||'green';
-  const rag=document.getElementById('ragBadge');
-  rag.className='rag '+h;
-  rag.textContent=h==='green'?'On track':h==='amber'?'At risk':'Critical';
-}
+  function kpiCard(lbl,val,cls,hint){
+    return `<div class="kpi"><div class="lbl">${lbl}</div><div class="val ${cls||''}">${val}</div>${hint?`<div class="hint">${hint}</div>`:''}</div>`;
+  }
 
-function renderKPIs(){
-  const k=DATA.kpis||{};
-  let h='';
-  h+=kpiCard('Total tasks',k.total_tasks||0,'');
-  h+=kpiCard('Complete',k.complete||0,'green');
-  h+=kpiCard('In progress',k.in_progress||0,'accent');
-  h+=kpiCard('Blocked',k.blocked||0,(k.blocked||0)>0?'red':'');
-  h+=kpiCard('Overdue',k.overdue||0,(k.overdue||0)>0?'red':'green');
-  const a=k.avg_slip||0;
-  h+=kpiCard('Avg slip',a+'d',a>7?'red':a>0?'orange':'green');
-  h+=kpiCard('Open defects',k.open_defects||0,(k.open_defects||0)>0?'orange':'green');
-  h+=kpiCard('Critical defects',k.critical_defects||0,(k.critical_defects||0)>0?'red':'green');
-  document.getElementById('kpiGrid').innerHTML=h;
-}
+  function destroyChart(k){if(charts[k]){try{charts[k].destroy();}catch(e){}delete charts[k];}}
 
-function renderOverview(){
-  applyChartDefaults();
-  const tasks=DATA.tasks||[];
+  function applyChartDefaults(){
+    if(typeof Chart==='undefined')return;
+    Chart.defaults.color='#e6edf3';
+    Chart.defaults.borderColor='#232a36';
+    Chart.defaults.font.family='-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif';
+    Chart.defaults.font.size=11;
+  }
 
-  const stCounts={};
-  tasks.forEach(t=>{stCounts[t.status]=(stCounts[t.status]||0)+1;});
-  destroyChart('status');
-  charts.status=new Chart(document.getElementById('chStatus'),{
-    type:'doughnut',
-    data:{labels:Object.keys(stCounts),datasets:[{data:Object.values(stCounts),
-      backgroundColor:['#3fb950','#58a6ff','#f85149','#f0883e','#8b949e','#d29922','#a371f7'],
-      borderColor:'#0e1117',borderWidth:2}]},
-    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom'}}}
+  function renderHeader(){
+    const c=DATA.config||{};
+    document.getElementById('logoInitial').textContent=(c.client||'P').slice(0,2).toUpperCase();
+    const h=(DATA.kpis&&DATA.kpis.health)||'green';
+    const rag=document.getElementById('ragBadge');
+    rag.className='rag '+h;
+    rag.textContent=h==='green'?'On track':h==='amber'?'At risk':'Critical';
+  }
+
+  function renderKPIs(){
+    const k=DATA.kpis||{};
+    let h='';
+    h+=kpiCard('Total tasks',k.total_tasks||0,'');
+    h+=kpiCard('Complete',k.complete||0,'green');
+    h+=kpiCard('In progress',k.in_progress||0,'accent');
+    h+=kpiCard('Blocked',k.blocked||0,(k.blocked||0)>0?'red':'');
+    h+=kpiCard('Overdue',k.overdue||0,(k.overdue||0)>0?'red':'green');
+    const a=k.avg_slip||0;
+    h+=kpiCard('Avg slip',a+'d',a>7?'red':a>0?'orange':'green');
+    h+=kpiCard('Open defects',k.open_defects||0,(k.open_defects||0)>0?'orange':'green');
+    h+=kpiCard('Critical defects',k.critical_defects||0,(k.critical_defects||0)>0?'red':'green');
+    document.getElementById('kpiGrid').innerHTML=h;
+  }
+
+  function renderOverview(){
+    applyChartDefaults();
+    const tasks=DATA.tasks||[];
+    const stCounts={};
+    tasks.forEach(t=>{stCounts[t.status]=(stCounts[t.status]||0)+1;});
+    destroyChart('status');
+    charts.status=new Chart(document.getElementById('chStatus'),{
+      type:'doughnut',
+      data:{labels:Object.keys(stCounts),datasets:[{data:Object.values(stCounts),
+        backgroundColor:['#3fb950','#58a6ff','#f85149','#f0883e','#8b949e','#d29922','#a371f7'],
+        borderColor:'#0e1117',borderWidth:2}]},
+      options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom'}}}
+    });
+    const prCounts={P0:0,P1:0,P2:0,P3:0};
+    tasks.forEach(t=>{if(prCounts[t.priority]!==undefined)prCounts[t.priority]++;});
+    destroyChart('priority');
+    charts.priority=new Chart(document.getElementById('chPriority'),{
+      type:'bar',
+      data:{labels:Object.keys(prCounts),datasets:[{label:'Tasks',data:Object.values(prCounts),
+        backgroundColor:['#f85149','#f0883e','#58a6ff','#8b949e']}]},
+      options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
+        scales:{y:{beginAtZero:true,ticks:{precision:0}}}}
+    });
+    const buckets={'0':0,'1-7':0,'8-30':0,'31-60':0,'60+':0};
+    tasks.forEach(t=>{
+      const s=t.slip_days||0;
+      if(s<=0)buckets['0']++;else if(s<=7)buckets['1-7']++;
+      else if(s<=30)buckets['8-30']++;else if(s<=60)buckets['31-60']++;else buckets['60+']++;
+    });
+    destroyChart('slip');
+    charts.slip=new Chart(document.getElementById('chSlip'),{
+      type:'bar',
+      data:{labels:Object.keys(buckets),datasets:[{label:'Tasks',data:Object.values(buckets),
+        backgroundColor:['#3fb950','#d29922','#f0883e','#f85149','#f85149']}]},
+      options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
+        scales:{y:{beginAtZero:true,ticks:{precision:0}}}}
+    });
+    const crit=tasks.filter(t=>t.critical).sort((a,b)=>(b.slip_days||0)-(a.slip_days||0)).slice(0,10);
+    document.getElementById('tblCritical').innerHTML=renderTaskTable(crit,true);
+    document.getElementById('tblUpdates').innerHTML=renderUpdatesTable((DATA.updates||[]).slice(0,15));
+  }
+
+  function renderTaskTable(rows,compact){
+    if(!rows.length)return '<div class="empty">No tasks.</div>';
+    let h='<table class="data"><thead><tr><th>ID</th><th>Name</th><th>Owner</th><th>Status</th>'+
+      (compact?'':'<th>Priority</th><th>Baseline</th>')+
+      '<th>Forecast</th><th>Slip</th></tr></thead><tbody>';
+    rows.forEach(t=>{
+      const sd=t.slip_days||0;
+      const slipCls=sd>30?'red':sd>7?'orange':sd>0?'orange':'green';
+      const stCls=t.status==='Complete'?'green':t.status==='Blocked'?'red':t.status==='In Progress'?'blue':'gray';
+      h+=`<tr>
+        <td><code>${esc(t.id)}</code></td>
+        <td>${esc(t.name)}${t.critical?' <span class="pill red">CP</span>':''}</td>
+        <td>${esc(t.owner_id)}</td>
+        <td><span class="pill ${stCls}">${esc(t.status)}</span></td>
+        ${compact?'':`<td>${esc(t.priority)}</td><td>${esc(t.baseline_end)}</td>`}
+        <td>${esc(t.forecast_end)}</td>
+        <td><span class="pill ${slipCls}">${sd>0?'+':''}${sd}d</span></td>
+      </tr>`;
+    });
+    return h+'</tbody></table>';
+  }
+
+  function renderUpdatesTable(rows){
+    if(!rows.length)return '<div class="empty">No recent updates.</div>';
+    let h='<table class="data"><thead><tr><th>When</th><th>Entity</th><th>Field</th><th>Change</th></tr></thead><tbody>';
+    rows.forEach(u=>{
+      h+=`<tr><td>${esc(u.timestamp)}</td><td><code>${esc(u.entity_id)}</code></td>
+        <td>${esc(u.field)}</td><td>${esc(u.old_value)} → ${esc(u.new_value)}</td></tr>`;
+    });
+    return h+'</tbody></table>';
+  }
+
+  function renderTasks(){
+    const t=DATA.tasks||[];
+    document.getElementById('taskCount').textContent='('+t.length+')';
+    document.getElementById('tblTasks').innerHTML=renderTaskTable(t,false);
+  }
+
+  function renderDefects(){
+    applyChartDefaults();
+    const d=DATA.defects||[];
+    document.getElementById('defectCount').textContent='('+d.length+')';
+    const open=d.filter(x=>x.is_open);
+
+    const sevCounts={Critical:0,Major:0,Minor:0,Trivial:0};
+    open.forEach(x=>{if(sevCounts[x.severity]!==undefined)sevCounts[x.severity]++;});
+    destroyChart('defsev');
+    charts.defsev=new Chart(document.getElementById('chDefSev'),{
+      type:'bar',
+      data:{labels:Object.keys(sevCounts),datasets:[{label:'Open',data:Object.values(sevCounts),
+        backgroundColor:['#f85149','#f0883e','#58a6ff','#8b949e']}]},
+      options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
+        scales:{y:{beginAtZero:true,ticks:{precision:0}}}}
+    });
+
+    const ageBuckets={'0-7':0,'8-14':0,'15-30':0,'31-60':0,'60+':0};
+    open.forEach(x=>{
+      const a=x.age_days||0;
+      if(a<=7)ageBuckets['0-7']++;else if(a<=14)ageBuckets['8-14']++;
+      else if(a<=30)ageBuckets['15-30']++;else if(a<=60)ageBuckets['31-60']++;else ageBuckets['60+']++;
+    });
+    destroyChart('age');
+    charts.age=new Chart(document.getElementById('chAge'),{
+      type:'bar',
+      data:{labels:Object.keys(ageBuckets),datasets:[{label:'Defects',data:Object.values(ageBuckets),
+        backgroundColor:['#3fb950','#d29922','#f0883e','#f85149','#f85149']}]},
+      options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
+        scales:{y:{beginAtZero:true,ticks:{precision:0}}}}
+    });
+
+    const pareto={};
+    d.forEach(x=>{
+      const rc=(x.root_cause||'').trim();
+      if(!rc||rc==='-')return;
+      pareto[rc]=(pareto[rc]||0)+1;
+    });
+    const items=Object.entries(pareto).sort((a,b)=>b[1]-a[1]).slice(0,8);
+    const labels=items.map(x=>x[0].length>30?x[0].slice(0,27)+'...':x[0]);
+    const counts=items.map(x=>x[1]);
+    const total=counts.reduce((a,b)=>a+b,0)||1;
+    const cum=[];let run=0;
+    counts.forEach(c=>{run+=c;cum.push(Math.round(run/total*100));});
+    destroyChart('pareto');
+    charts.pareto=new Chart(document.getElementById('chPareto'),{
+      data:{labels:labels,datasets:[
+        {type:'bar',label:'Count',data:counts,backgroundColor:'#58a6ff',yAxisID:'y'},
+        {type:'line',label:'Cum %',data:cum,borderColor:'#f85149',yAxisID:'y1',tension:0.2}
+      ]},
+      options:{responsive:true,maintainAspectRatio:false,
+        scales:{y:{beginAtZero:true,position:'left',ticks:{precision:0}},
+          y1:{beginAtZero:true,position:'right',max:100,grid:{display:false}}},
+        plugins:{legend:{position:'bottom'}}}
+    });
+
+    let h='<table class="data"><thead><tr><th>ID</th><th>Title</th><th>Severity</th><th>Status</th><th>Assigned</th><th>Age</th><th>Linked</th></tr></thead><tbody>';
+    d.forEach(x=>{
+      const sevCls=x.severity==='Critical'?'red':x.severity==='Major'?'orange':x.severity==='Minor'?'blue':'gray';
+      const stCls=x.is_open?'orange':'green';
+      h+=`<tr>
+        <td><code>${esc(x.id)}</code></td>
+        <td>${esc(x.title)}</td>
+        <td><span class="pill ${sevCls}">${esc(x.severity)}</span></td>
+        <td><span class="pill ${stCls}">${esc(x.status)}</span></td>
+        <td>${esc(x.assigned_to)}</td>
+        <td>${x.age_days!=null?x.age_days+'d':'—'}</td>
+        <td>${esc(x.linked_task_id)}</td>
+      </tr>`;
+    });
+    document.getElementById('tblDefects').innerHTML=h+'</tbody></table>';
+  }
+
+  function renderGantt(){
+    if(typeof Plotly==='undefined')return;
+    const tasks=DATA.tasks||[];
+    if(!tasks.length){document.getElementById('ganttChart').innerHTML='<div class="empty">No tasks.</div>';return;}
+    const traces=[];
+    const yOrder=tasks.map(t=>t.id);
+    const today=new Date().toISOString().slice(0,10);
+
+    tasks.forEach(t=>{
+      if(t.baseline_start&&t.baseline_end){
+        traces.push({type:'scatter',mode:'lines',x:[t.baseline_start,t.baseline_end],y:[t.id,t.id],
+          line:{color:'#4a525c',width:8},name:'Baseline',text:['Baseline',t.name],
+          hoverinfo:'text+name',showlegend:false});
+      }
+      if(t.forecast_start&&t.forecast_end){
+        traces.push({type:'scatter',mode:'lines',x:[t.forecast_start,t.forecast_end],y:[t.id,t.id],
+          line:{color:t.critical?'#f85149':'#58a6ff',width:10},name:'Forecast',
+          text:['Forecast',t.name],hoverinfo:'text+name',showlegend:false});
+      }
+      if(t.actual_start&&t.actual_finish){
+        traces.push({type:'scatter',mode:'lines',x:[t.actual_start,t.actual_finish],y:[t.id,t.id],
+          line:{color:'#3fb950',width:6},name:'Actual',
+          text:['Actual',t.name],hoverinfo:'text+name',showlegend:false});
+      }
+    });
+
+    traces.push({type:'scatter',mode:'lines',x:[null,null],y:[null,null],
+      line:{color:'#4a525c',width:8},name:'Baseline',showlegend:true});
+    traces.push({type:'scatter',mode:'lines',x:[null,null],y:[null,null],
+      line:{color:'#58a6ff',width:10},name:'Forecast',showlegend:true});
+    traces.push({type:'scatter',mode:'lines',x:[null,null],y:[null,null],
+      line:{color:'#f85149',width:10},name:'Forecast (critical)',showlegend:true});
+    traces.push({type:'scatter',mode:'lines',x:[null,null],y:[null,null],
+      line:{color:'#3fb950',width:6},name:'Actual',showlegend:true});
+
+    const layout={
+      paper_bgcolor:'#0e1117',plot_bgcolor:'#0e1117',
+      font:{color:'#e6edf3',size:11},
+      showlegend:true,
+      legend:{orientation:'h',yanchor:'bottom',y:1.02,xanchor:'left',x:0,
+        bgcolor:'rgba(0,0,0,0)',font:{size:10}},
+      margin:{l:100,r:20,t:60,b:40},
+      xaxis:{type:'date',gridcolor:'#232a34',zerolinecolor:'#232a34'},
+      yaxis:{categoryorder:'array',categoryarray:yOrder.slice().reverse(),
+        gridcolor:'#1a2029',tickfont:{size:10}},
+      shapes:[{type:'line',x0:today,x1:today,y0:0,y1:1,yref:'paper',
+        line:{color:'#f85149',width:2,dash:'dash'}}],
+      height:Math.max(400,tasks.length*26+120)
+    };
+    Plotly.newPlot('ganttChart',traces,layout,{displayModeBar:false,responsive:true});
+  }
+
+  function renderAllUpdates(){
+    const rows=DATA.updates||[];
+    document.getElementById('tblAllUpdates').innerHTML=renderUpdatesTable(rows);
+  }
+
+  document.getElementById('tabs').addEventListener('click',function(e){
+    const b=e.target.closest('.tab');
+    if(!b)return;
+    const t=b.dataset.tab;
+    document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+    b.classList.add('active');
+    document.querySelectorAll('.tab-content').forEach(x=>x.style.display='none');
+    document.getElementById('tab-'+t).style.display='block';
+    if(t==='gantt')renderGantt();
   });
 
-  const prCounts={P0:0,P1:0,P2:0,P3:0};
-  tasks.forEach(t=>{if(prCounts[t.priority]!==undefined)prCounts[t.priority]++;});
-  destroyChart('priority');
-  charts.priority=new Chart(document.getElementById('chPriority'),{
-    type:'bar',
-    data:{labels:Object.keys(prCounts),datasets:[{label:'Tasks',data:Object.values(prCounts),
-      backgroundColor:['#f85149','#f0883e','#58a6ff','#8b949e']}]},
-    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
-      scales:{y:{beginAtZero:true,ticks:{precision:0}}}}
-  });
-
-  const buckets={'0':0,'1-7':0,'8-30':0,'31-60':0,'60+':0};
-  tasks.forEach(t=>{
-    const s=t.slip_days||0;
-    if(s<=0)buckets['0']++;else if(s<=7)buckets['1-7']++;
-    else if(s<=30)buckets['8-30']++;else if(s<=60)buckets['31-60']++;else buckets['60+']++;
-  });
-  destroyChart('slip');
-  charts.slip=new Chart(document.getElementById('chSlip'),{
-    type:'bar',
-    data:{labels:Object.keys(buckets),datasets:[{label:'Tasks',data:Object.values(buckets),
-      backgroundColor:['#3fb950','#d29922','#f0883e','#f85149','#f85149']}]},
-    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
-      scales:{y:{beginAtZero:true,ticks:{precision:0}}}}
-  });
-
-  const crit=tasks.filter(t=>t.critical).sort((a,b)=>(b.slip_days||0)-(a.slip_days||0)).slice(0,10);
-  document.getElementById('tblCritical').innerHTML=renderTaskTable(crit,true);
-  document.getElementById('tblUpdates').innerHTML=renderUpdatesTable((DATA.updates||[]).slice(0,15));
-}
-
-function renderTaskTable(rows,compact){
-  if(!rows.length)return '<div class="empty">No tasks.</div>';
-  let h='<table class="data"><thead><tr><th>ID</th><th>Name</th><th>Owner</th><th>Status</th>'+
-    (compact?'':'<th>Priority</th><th>Baseline</th>')+
-    '<th>Forecast</th><th>Slip</th></tr></thead><tbody>';
-  rows.forEach(t=>{
-    const sd=t.slip_days||0;
-    const slipCls=sd>30?'red':sd>7?'orange':sd>0?'orange':'green';
-    const stCls=t.status==='Complete'?'green':t.status==='Blocked'?'red':t.status==='In Progress'?'blue':'gray';
-    h+=`<tr>
-      <td><code>${esc(t.id)}</code></td>
-      <td>${esc(t.name)}${t.critical?' <span class="pill red">CP</span>':''}</td>
-      <td>${esc(t.owner_id)}</td>
-      <td><span class="pill ${stCls}">${esc(t.status)}</span></td>
-      ${compact?'':`<td>${esc(t.priority)}</td><td>${esc(t.baseline_end)}</td>`}
-      <td>${esc(t.forecast_end)}</td>
-      <td><span class="pill ${slipCls}">${sd>0?'+':''}${sd}d</span></td>
-    </tr>`;
-  });
-  return h+'</tbody></table>';
-}
-
-function renderUpdatesTable(rows){
-  if(!rows.length)return '<div class="empty">No recent updates.</div>';
-  let h='<table class="data"><thead><tr><th>When</th><th>Entity</th><th>Field</th><th>Change</th></tr></thead><tbody>';
-  rows.forEach(u=>{
-    h+=`<tr><td>${esc(u.timestamp)}</td><td><code>${esc(u.entity_id)}</code></td>
-      <td>${esc(u.field)}</td><td>${esc(u.old_value)} → ${esc(u.new_value)}</td></tr>`;
-  });
-  return h+'</tbody></table>';
-}
-
-function renderTasks(){
-  const t=DATA.tasks||[];
-  document.getElementById('taskCount').textContent='('+t.length+')';
-  document.getElementById('tblTasks').innerHTML=renderTaskTable(t,false);
-}
-
-function renderDefects(){
-  applyChartDefaults();
-  const d=DATA.defects||[];
-  document.getElementById('defectCount').textContent='('+d.length+')';
-  const open=d.filter(x=>x.is_open);
-
-  const sevCounts={Critical:0,Major:0,Minor:0,Trivial:0};
-  open.forEach(x=>{if(sevCounts[x.severity]!==undefined)sevCounts[x.severity]++;});
-  destroyChart('defsev');
-  charts.defsev=new Chart(document.getElementById('chDefSev'),{
-    type:'bar',
-    data:{labels:Object.keys(sevCounts),datasets:[{label:'Open',data:Object.values(sevCounts),
-      backgroundColor:['#f85149','#f0883e','#58a6ff','#8b949e']}]},
-    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
-      scales:{y:{beginAtZero:true,ticks:{precision:0}}}}
-  });
-
-  const ageBuckets={'0-7':0,'8-14':0,'15-30':0,'31-60':0,'60+':0};
-  open.forEach(x=>{
-    const a=x.age_days||0;
-    if(a<=7)ageBuckets['0-7']++;else if(a<=14)ageBuckets['8-14']++;
-    else if(a<=30)ageBuckets['15-30']++;else if(a<=60)ageBuckets['31-60']++;else ageBuckets['60+']++;
-  });
-  destroyChart('age');
-  charts.age=new Chart(document.getElementById('chAge'),{
-    type:'bar',
-    data:{labels:Object.keys(ageBuckets),datasets:[{label:'Defects',data:Object.values(ageBuckets),
-      backgroundColor:['#3fb950','#d29922','#f0883e','#f85149','#f85149']}]},
-    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
-      scales:{y:{beginAtZero:true,ticks:{precision:0}}}}
-  });
-
-  const pareto={};
-  d.forEach(x=>{
-    const rc=(x.root_cause||'').trim();
-    if(!rc||rc==='-')return;
-    pareto[rc]=(pareto[rc]||0)+1;
-  });
-  const items=Object.entries(pareto).sort((a,b)=>b[1]-a[1]).slice(0,8);
-  const labels=items.map(x=>x[0].length>30?x[0].slice(0,27)+'...':x[0]);
-  const counts=items.map(x=>x[1]);
-  const total=counts.reduce((a,b)=>a+b,0)||1;
-  const cum=[];let run=0;
-  counts.forEach(c=>{run+=c;cum.push(Math.round(run/total*100));});
-  destroyChart('pareto');
-  charts.pareto=new Chart(document.getElementById('chPareto'),{
-    data:{labels:labels,datasets:[
-      {type:'bar',label:'Count',data:counts,backgroundColor:'#58a6ff',yAxisID:'y'},
-      {type:'line',label:'Cum %',data:cum,borderColor:'#f85149',yAxisID:'y1',tension:0.2}
-    ]},
-    options:{responsive:true,maintainAspectRatio:false,
-      scales:{y:{beginAtZero:true,position:'left',ticks:{precision:0}},
-        y1:{beginAtZero:true,position:'right',max:100,grid:{display:false}}},
-      plugins:{legend:{position:'bottom'}}}
-  });
-
-  let h='<table class="data"><thead><tr><th>ID</th><th>Title</th><th>Severity</th><th>Status</th><th>Assigned</th><th>Age</th><th>Linked</th></tr></thead><tbody>';
-  d.forEach(x=>{
-    const sevCls=x.severity==='Critical'?'red':x.severity==='Major'?'orange':x.severity==='Minor'?'blue':'gray';
-    const stCls=x.is_open?'orange':'green';
-    h+=`<tr>
-      <td><code>${esc(x.id)}</code></td>
-      <td>${esc(x.title)}</td>
-      <td><span class="pill ${sevCls}">${esc(x.severity)}</span></td>
-      <td><span class="pill ${stCls}">${esc(x.status)}</span></td>
-      <td>${esc(x.assigned_to)}</td>
-      <td>${x.age_days!=null?x.age_days+'d':'—'}</td>
-      <td>${esc(x.linked_task_id)}</td>
-    </tr>`;
-  });
-  document.getElementById('tblDefects').innerHTML=h+'</tbody></table>';
-}
-
-function renderGantt(){
-  if(typeof Plotly==='undefined')return;
-  const tasks=DATA.tasks||[];
-  if(!tasks.length){document.getElementById('ganttChart').innerHTML='<div class="empty">No tasks.</div>';return;}
-  const traces=[];
-  const yOrder=tasks.map(t=>t.id);
-  const today=new Date().toISOString().slice(0,10);
-
-  tasks.forEach(t=>{
-    if(t.baseline_start&&t.baseline_end){
-      traces.push({type:'scatter',mode:'lines',x:[t.baseline_start,t.baseline_end],y:[t.id,t.id],
-        line:{color:'#4a525c',width:8},name:'Baseline',text:['Baseline',t.name],
-        hoverinfo:'text+name',showlegend:false});
-    }
-    if(t.forecast_start&&t.forecast_end){
-      traces.push({type:'scatter',mode:'lines',x:[t.forecast_start,t.forecast_end],y:[t.id,t.id],
-        line:{color:t.critical?'#f85149':'#58a6ff',width:10},name:'Forecast',
-        text:['Forecast',t.name],hoverinfo:'text+name',showlegend:false});
-    }
-    if(t.actual_start&&t.actual_finish){
-      traces.push({type:'scatter',mode:'lines',x:[t.actual_start,t.actual_finish],y:[t.id,t.id],
-        line:{color:'#3fb950',width:6},name:'Actual',
-        text:['Actual',t.name],hoverinfo:'text+name',showlegend:false});
-    }
-  });
-
-  traces.push({type:'scatter',mode:'lines',x:[null,null],y:[null,null],
-    line:{color:'#4a525c',width:8},name:'Baseline',showlegend:true});
-  traces.push({type:'scatter',mode:'lines',x:[null,null],y:[null,null],
-    line:{color:'#58a6ff',width:10},name:'Forecast',showlegend:true});
-  traces.push({type:'scatter',mode:'lines',x:[null,null],y:[null,null],
-    line:{color:'#f85149',width:10},name:'Forecast (critical)',showlegend:true});
-  traces.push({type:'scatter',mode:'lines',x:[null,null],y:[null,null],
-    line:{color:'#3fb950',width:6},name:'Actual',showlegend:true});
-
-  const layout={
-    paper_bgcolor:'#0e1117',plot_bgcolor:'#0e1117',
-    font:{color:'#e6edf3',size:11},
-    showlegend:true,
-    legend:{orientation:'h',yanchor:'bottom',y:1.02,xanchor:'left',x:0,
-      bgcolor:'rgba(0,0,0,0)',font:{size:10}},
-    margin:{l:100,r:20,t:60,b:40},
-    xaxis:{type:'date',gridcolor:'#232a34',zerolinecolor:'#232a34'},
-    yaxis:{categoryorder:'array',categoryarray:yOrder.slice().reverse(),
-      gridcolor:'#1a2029',tickfont:{size:10}},
-    shapes:[{type:'line',x0:today,x1:today,y0:0,y1:1,yref:'paper',
-      line:{color:'#f85149',width:2,dash:'dash'}}],
-    height:Math.max(400,tasks.length*26+120)
-  };
-  Plotly.newPlot('ganttChart',traces,layout,{displayModeBar:false,responsive:true});
-}
-
-function renderAllUpdates(){
-  const rows=DATA.updates||[];
-  document.getElementById('tblAllUpdates').innerHTML=renderUpdatesTable(rows);
-}
-
-document.getElementById('tabs').addEventListener('click',function(e){
-  const b=e.target.closest('.tab');
-  if(!b)return;
-  const t=b.dataset.tab;
-  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
-  b.classList.add('active');
-  document.querySelectorAll('.tab-content').forEach(x=>x.style.display='none');
-  document.getElementById('tab-'+t).style.display='block';
-  if(t==='gantt')renderGantt();
+  renderHeader();
+  renderKPIs();
+  renderOverview();
+  renderTasks();
+  renderDefects();
+  renderGantt();
+  renderAllUpdates();
 });
-
-renderHeader();
-renderKPIs();
-renderOverview();
-renderTasks();
-renderDefects();
-renderGantt();
-renderAllUpdates();
 </script>
 </body>
 </html>

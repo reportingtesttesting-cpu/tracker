@@ -38,6 +38,12 @@ DASHBOARDS_DIR = os.path.join(os.path.dirname(__file__), "..", "dashboards")
 
 CLOSED_DEFECT_STATES = ["Closed", "Verified", "Rejected", "Duplicate"]
 
+REDIRECTS_CONTENT = (
+    "/executive/*     200!  Role=executive\n"
+    "/tomato_farms/*  200!  Role=tomato_farms\n"
+    "/*               /  200\n"
+)
+
 
 def connect():
     creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
@@ -229,7 +235,7 @@ def compute_kpis(tasks, defects):
     }
 
 
-def render(audience, config, kpis, tasks, defects, dependencies, updates):
+def render(audience, role, config, kpis, tasks, defects, dependencies, updates):
     env = Environment(loader=FileSystemLoader(TEMPLATES_DIR), autoescape=False)
     template = env.get_template("dashboard.html")
 
@@ -249,7 +255,7 @@ def render(audience, config, kpis, tasks, defects, dependencies, updates):
         client=config.get("client", ""),
         contract_id=config.get("contract_id", ""),
         generated_at=datetime.now().strftime("%Y-%m-%d %H:%M"),
-        audience=audience,
+        audience=role,
         data_json=data_json,
     )
 
@@ -259,6 +265,23 @@ def render(audience, config, kpis, tasks, defects, dependencies, updates):
     with open(out_path, "w", encoding="utf-8") as f:
         f.write(html)
     print(f"  Wrote {out_path} ({len(html)} bytes)")
+
+
+def render_root():
+    env = Environment(loader=FileSystemLoader(TEMPLATES_DIR), autoescape=False)
+    template = env.get_template("root.html")
+    html = template.render()
+    out_path = os.path.join(DASHBOARDS_DIR, "index.html")
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.write(html)
+    print(f"  Wrote {out_path} ({len(html)} bytes)")
+
+
+def write_redirects():
+    out_path = os.path.join(DASHBOARDS_DIR, "_redirects")
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.write(REDIRECTS_CONTENT)
+    print(f"  Wrote {out_path}")
 
 
 def main():
@@ -284,9 +307,15 @@ def main():
 
     print("KPIs:", json.dumps(kpis))
 
+    print("Rendering root...")
+    render_root()
+
+    print("Writing redirects...")
+    write_redirects()
+
     print("Rendering audiences...")
-    render("executive", config, kpis, tasks, defects, dependencies, updates)
-    render("tomato_farms", config, kpis, tasks, defects, dependencies, updates)
+    render("executive", "executive", config, kpis, tasks, defects, dependencies, updates)
+    render("tomato_farms", "tomato_farms", config, kpis, tasks, defects, dependencies, updates)
 
     print("Done.")
 
