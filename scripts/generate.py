@@ -236,6 +236,7 @@ def compute_kpis(tasks, defects):
 
 
 def render(audience, role, config, kpis, tasks, defects, dependencies, updates):
+    os.makedirs(DASHBOARDS_DIR, exist_ok=True)
     env = Environment(loader=FileSystemLoader(TEMPLATES_DIR), autoescape=False)
     template = env.get_template("dashboard.html")
 
@@ -268,6 +269,7 @@ def render(audience, role, config, kpis, tasks, defects, dependencies, updates):
 
 
 def render_root():
+    os.makedirs(DASHBOARDS_DIR, exist_ok=True)
     env = Environment(loader=FileSystemLoader(TEMPLATES_DIR), autoescape=False)
     template = env.get_template("root.html")
     html = template.render()
@@ -278,6 +280,7 @@ def render_root():
 
 
 def write_redirects():
+    os.makedirs(DASHBOARDS_DIR, exist_ok=True)
     out_path = os.path.join(DASHBOARDS_DIR, "_redirects")
     with open(out_path, "w", encoding="utf-8") as f:
         f.write(REDIRECTS_CONTENT)
