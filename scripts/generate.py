@@ -4,7 +4,9 @@ import tempfile
 from datetime import datetime, timezone
 
 import gspread
-from google.oauth2.service_account import Credentials
+from google.oauth2.credentials import Credentials as UserCredentials
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
 import pandas as pd
 from dotenv import load_dotenv
 from jinja2 import Environment, FileSystemLoader
@@ -14,22 +16,14 @@ load_dotenv()
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets.readonly",
-    "https://www.googleapis.com/auth/drive.readonly",
+    "https://www.googleapis.com/auth/drive",
 ]
 
-_raw_creds = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
+GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()
+GOOGLE_REFRESH_TOKEN = os.environ.get("GOOGLE_REFRESH_TOKEN", "").strip()
 
-if _raw_creds.startswith("{"):
-    _tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
-    _tmp.write(_raw_creds)
-    _tmp.close()
-    SERVICE_ACCOUNT_FILE = _tmp.name
-else:
-    SERVICE_ACCOUNT_FILE = _raw_creds or os.path.join(
-        os.path.dirname(__file__), "..", "secrets", "service-account.json"
-    )
-
-SHEET_ID = os.environ.get("SHEET_ID", "")
+SHEET_ID = os.environ.get("SHEET_ID", "").strip()
 
 TABS = ["Config", "People", "Tasks", "Defects", "Dependencies", "Updates"]
 
@@ -38,15 +32,20 @@ DASHBOARDS_DIR = os.path.join(os.path.dirname(__file__), "..", "dashboards")
 
 CLOSED_DEFECT_STATES = ["Closed", "Verified", "Rejected", "Duplicate"]
 
-REDIRECTS_CONTENT = (
-    "/executive/*     200!  Role=executive\n"
-    "/tomato_farms/*  200!  Role=tomato_farms\n"
-    "/*               /  200\n"
-)
+
+def get_credentials():
+    return UserCredentials(
+        token=None,
+        refresh_token=GOOGLE_REFRESH_TOKEN,
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=GOOGLE_CLIENT_ID,
+        client_secret=GOOGLE_CLIENT_SECRET,
+        scopes=SCOPES,
+    )
 
 
 def connect():
-    creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
+    creds = get_credentials()
     client = gspread.authorize(creds)
     return client.open_by_key(SHEET_ID)
 
@@ -266,25 +265,26 @@ def render(audience, role, config, kpis, tasks, defects, dependencies, updates):
     with open(out_path, "w", encoding="utf-8") as f:
         f.write(html)
     print(f"  Wrote {out_path} ({len(html)} bytes)")
+    return out_path
 
 
-def render_root():
-    os.makedirs(DASHBOARDS_DIR, exist_ok=True)
-    env = Environment(loader=FileSystemLoader(TEMPLATES_DIR), autoescape=False)
-    template = env.get_template("root.html")
-    html = template.render()
-    out_path = os.path.join(DASHBOARDS_DIR, "index.html")
-    with open(out_path, "w", encoding="utf-8") as f:
-        f.write(html)
-    print(f"  Wrote {out_path} ({len(html)} bytes)")
+def upload_to_drive(local_path, folder_id, filename):
+    creds = get_credentials()
+    service = build("drive", "v3", credentials=creds)
 
+    query = f"name='{filename}' and '{folder_id}' in parents and trashed=false"
+    existing = service.files().list(q=query, fields="files(id)").execute().get("files", [])
 
-def write_redirects():
-    os.makedirs(DASHBOARDS_DIR, exist_ok=True)
-    out_path = os.path.join(DASHBOARDS_DIR, "_redirects")
-    with open(out_path, "w", encoding="utf-8") as f:
-        f.write(REDIRECTS_CONTENT)
-    print(f"  Wrote {out_path}")
+    media = MediaFileUpload(local_path, mimetype="text/html", resumable=False)
+
+    if existing:
+        file_id = existing[0]["id"]
+        service.files().update(fileId=file_id, media_body=media).execute()
+        print(f"  Drive updated: {filename} (id={file_id})")
+    else:
+        meta = {"name": filename, "parents": [folder_id]}
+        created = service.files().create(body=meta, media_body=media, fields="id").execute()
+        print(f"  Drive created: {filename} (id={created['id']})")
 
 
 def main():
@@ -310,15 +310,17 @@ def main():
 
     print("KPIs:", json.dumps(kpis))
 
-    print("Rendering root...")
-    render_root()
+    folder_id = config.get("drive_dashboard_folder_id")
 
-    print("Writing redirects...")
-    write_redirects()
+    print("Rendering executive...")
+    exec_path = render("executive", "executive", config, kpis, tasks, defects, dependencies, updates)
+    if folder_id:
+        upload_to_drive(exec_path, folder_id, "executive_dashboard.html")
 
-    print("Rendering audiences...")
-    render("executive", "executive", config, kpis, tasks, defects, dependencies, updates)
-    render("tomato_farms", "tomato_farms", config, kpis, tasks, defects, dependencies, updates)
+    print("Rendering tomato_farms...")
+    tf_path = render("tomato_farms", "tomato_farms", config, kpis, tasks, defects, dependencies, updates)
+    if folder_id:
+        upload_to_drive(tf_path, folder_id, "tomato_farms_dashboard.html")
 
     print("Done.")
 
