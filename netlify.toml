@@ -1,6 +1,0 @@
-[build]
-  command = "pip install -r requirements.txt && python scripts/generate.py"
-  publish = "dashboards"
-
-[build.environment]
-  PYTHON_VERSION = "3.12"
