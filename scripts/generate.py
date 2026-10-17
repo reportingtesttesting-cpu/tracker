@@ -1,15 +1,25 @@
 import os
+import socket
+
+_orig_getaddrinfo = socket.getaddrinfo
+def _ipv4_only(host, port, family=0, type=0, proto=0, flags=0):
+    return _orig_getaddrinfo(host, port, socket.AF_INET, type, proto, flags)
+socket.getaddrinfo = _ipv4_only
+
 import json
+import time
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 import gspread
 from google.oauth2.credentials import Credentials as UserCredentials
+from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 import pandas as pd
 from dotenv import load_dotenv
 from jinja2 import Environment, FileSystemLoader
+import requests
 
 
 load_dotenv()
@@ -22,6 +32,7 @@ SCOPES = [
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "").strip()
 GOOGLE_REFRESH_TOKEN = os.environ.get("GOOGLE_REFRESH_TOKEN", "").strip()
+DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "").strip()
 
 SHEET_ID = os.environ.get("SHEET_ID", "").strip()
 
@@ -32,16 +43,23 @@ DASHBOARDS_DIR = os.path.join(os.path.dirname(__file__), "..", "dashboards")
 
 CLOSED_DEFECT_STATES = ["Closed", "Verified", "Rejected", "Duplicate"]
 
+_credentials_cache = None
+
 
 def get_credentials():
-    return UserCredentials(
-        token=None,
-        refresh_token=GOOGLE_REFRESH_TOKEN,
-        token_uri="https://oauth2.googleapis.com/token",
-        client_id=GOOGLE_CLIENT_ID,
-        client_secret=GOOGLE_CLIENT_SECRET,
-        scopes=SCOPES,
-    )
+    global _credentials_cache
+    if _credentials_cache is None:
+        _credentials_cache = UserCredentials(
+            token=None,
+            refresh_token=GOOGLE_REFRESH_TOKEN,
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=GOOGLE_CLIENT_ID,
+            client_secret=GOOGLE_CLIENT_SECRET,
+            scopes=SCOPES,
+        )
+        _credentials_cache.refresh(Request())
+        print("  OAuth token refreshed")
+    return _credentials_cache
 
 
 def connect():
@@ -83,12 +101,19 @@ def parse_date(v):
         return None
 
 
-def build_tasks(tasks_df, people_df):
+def build_maps(people_df):
     company_map = {}
+    name_map = {}
     if len(people_df) > 0:
         for _, p in people_df.iterrows():
-            company_map[p.get("person_id", "")] = p.get("company", "")
+            pid = str(p.get("person_id", "")).strip()
+            if pid:
+                company_map[pid] = str(p.get("company", "")).strip()
+                name_map[pid] = str(p.get("name", "")).strip()
+    return company_map, name_map
 
+
+def build_tasks(tasks_df, company_map, name_map):
     out = []
     for _, r in tasks_df.iterrows():
         if not r.get("task_id"):
@@ -99,9 +124,11 @@ def build_tasks(tasks_df, people_df):
         slip = (fe - be).days if (be and fe) else 0
         out.append({
             "id": str(r.get("task_id")),
+            "parent_id": str(r.get("parent_task_id", "")).strip(),
             "name": str(r.get("name", "")),
             "description": str(r.get("description", "")),
             "owner_id": owner_id,
+            "owner_name": name_map.get(owner_id, owner_id),
             "owner_company": company_map.get(owner_id, ""),
             "status": str(r.get("status", "Not Started")),
             "percent": int(float(r.get("percent_complete", 0) or 0)),
@@ -115,16 +142,14 @@ def build_tasks(tasks_df, people_df):
             "actual_start": str(r.get("actual_start", ""))[:10],
             "actual_finish": str(r.get("actual_finish", ""))[:10],
             "slip_days": slip,
+            "cascade_start": "",
+            "cascade_end": "",
+            "cascade_slip_days": 0,
         })
     return out
 
 
-def build_defects(defects_df, people_df):
-    company_map = {}
-    if len(people_df) > 0:
-        for _, p in people_df.iterrows():
-            company_map[p.get("person_id", "")] = p.get("company", "")
-
+def build_defects(defects_df, company_map, name_map):
     today = datetime.now(timezone.utc).date()
     out = []
     for _, r in defects_df.iterrows():
@@ -144,6 +169,7 @@ def build_defects(defects_df, people_df):
             "priority": str(r.get("priority", "P2")),
             "status": status,
             "assigned_to": assigned,
+            "assigned_name": name_map.get(assigned, assigned),
             "assigned_company": company_map.get(assigned, ""),
             "detected_at": str(r.get("detected_at", ""))[:10],
             "closed_at": str(r.get("closed_at", ""))[:10],
@@ -195,7 +221,140 @@ def build_updates(updates_df):
             "source": str(r.get("source", "")),
         })
     out.sort(key=lambda x: x["timestamp"], reverse=True)
-    return out[:200]
+    return out
+
+
+def build_history(updates):
+    history = {}
+    for u in updates:
+        eid = u["entity_id"]
+        if not eid:
+            continue
+        history.setdefault(eid, []).append(u)
+    return history
+
+
+def apply_cascade(tasks, dependencies):
+    task_map = {t["id"]: t for t in tasks}
+    for t in tasks:
+        cs = parse_date(t.get("forecast_start")) or parse_date(t.get("baseline_start"))
+        ce = parse_date(t.get("forecast_end")) or parse_date(t.get("baseline_end"))
+        t["_cs"] = cs
+        t["_ce"] = ce
+
+    preds_of = {}
+    for d in dependencies:
+        if d["type"] != "FS":
+            continue
+        preds_of.setdefault(d["successor_id"], []).append(d)
+
+    for _ in range(50):
+        changed = False
+        for t in tasks:
+            preds = preds_of.get(t["id"], [])
+            if not preds or not t["_cs"] or not t["_ce"]:
+                continue
+            latest = None
+            for d in preds:
+                p = task_map.get(d["predecessor_id"])
+                if not p or not p["_ce"]:
+                    continue
+                candidate = p["_ce"] + timedelta(days=d["lag"])
+                if latest is None or candidate > latest:
+                    latest = candidate
+            if latest and latest > t["_cs"]:
+                delta = (latest - t["_cs"]).days
+                t["_cs"] = latest
+                t["_ce"] = t["_ce"] + timedelta(days=delta)
+                changed = True
+        if not changed:
+            break
+
+    for t in tasks:
+        if t["_cs"] and t["_ce"]:
+            t["cascade_start"] = t["_cs"].isoformat()
+            t["cascade_end"] = t["_ce"].isoformat()
+            be = parse_date(t.get("baseline_end"))
+            if be:
+                t["cascade_slip_days"] = (t["_ce"] - be).days
+        t.pop("_cs", None)
+        t.pop("_ce", None)
+
+    return tasks
+
+
+def compute_completion(tasks):
+    if not tasks:
+        return {"best": "", "likely": "", "worst": "", "avg_slip": 0}
+
+    best_dates = [parse_date(t["baseline_end"]) for t in tasks if parse_date(t["baseline_end"])]
+    likely_dates = [parse_date(t["cascade_end"]) for t in tasks if parse_date(t["cascade_end"])]
+    slips = [t["slip_days"] for t in tasks if t["slip_days"] > 0]
+    avg_slip = sum(slips) / len(slips) if slips else 0
+
+    worst_candidates = []
+    for t in tasks:
+        be = parse_date(t["baseline_end"])
+        if be:
+            worst_candidates.append(be + timedelta(days=int(avg_slip)))
+
+    return {
+        "best": max(best_dates).isoformat() if best_dates else "",
+        "likely": max(likely_dates).isoformat() if likely_dates else "",
+        "worst": max(worst_candidates).isoformat() if worst_candidates else "",
+        "avg_slip": round(avg_slip, 1),
+    }
+
+
+def generate_summaries(tasks, defects, history):
+    if not DEEPSEEK_API_KEY:
+        print("  DEEPSEEK_API_KEY not set. Skipping summaries.")
+        return {}
+
+    def batch(items, kind):
+        payload = []
+        for it in items:
+            h = history.get(it["id"], [])[:10]
+            payload.append({
+                "id": it["id"],
+                "name": it.get("name") or it.get("title"),
+                "status": it.get("status"),
+                "history": [f"{u['timestamp']} {u['field']}: {u['old_value']} -> {u['new_value']} {u['notes']}" for u in h],
+            })
+        prompt = (
+            f"You are a project controls analyst. For each {kind} below, write a one-sentence factual status summary "
+            "based only on the provided data. Do not invent. Output strict JSON: {\"ID\": \"summary\", ...}. "
+            f"DATA: {json.dumps(payload)}"
+        )
+        try:
+            r = requests.post(
+                "https://api.deepseek.com/chat/completions",
+                headers={"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"},
+                json={
+                    "model": "deepseek-chat",
+                    "messages": [
+                        {"role": "system", "content": "Output only valid JSON."},
+                        {"role": "user", "content": prompt},
+                    ],
+                    "temperature": 0,
+                    "response_format": {"type": "json_object"},
+                },
+                timeout=120,
+            )
+            if r.status_code != 200:
+                print(f"  AI error {r.status_code}: {r.text[:200]}")
+                return {}
+            content = r.json()["choices"][0]["message"]["content"]
+            return json.loads(content)
+        except Exception as e:
+            print(f"  AI summary failed: {e}")
+            return {}
+
+    out = {}
+    out.update(batch(tasks, "task"))
+    out.update(batch(defects, "defect"))
+    print(f"  Generated {len(out)} summaries")
+    return out
 
 
 def compute_kpis(tasks, defects):
@@ -234,7 +393,7 @@ def compute_kpis(tasks, defects):
     }
 
 
-def render(audience, role, config, kpis, tasks, defects, dependencies, updates):
+def render(audience, role, config, kpis, completion, tasks, defects, dependencies, updates, history, summaries):
     os.makedirs(DASHBOARDS_DIR, exist_ok=True)
     env = Environment(loader=FileSystemLoader(TEMPLATES_DIR), autoescape=False)
     template = env.get_template("dashboard.html")
@@ -242,10 +401,13 @@ def render(audience, role, config, kpis, tasks, defects, dependencies, updates):
     data = {
         "config": {k: str(v) for k, v in config.items()},
         "kpis": kpis,
+        "completion": completion,
         "tasks": tasks,
         "defects": defects,
         "dependencies": dependencies,
-        "updates": updates,
+        "updates": updates[:50],
+        "history": history,
+        "summaries": summaries,
     }
 
     data_json = json.dumps(data, default=str).replace("<", "\\u003c").replace(">", "\\u003e")
@@ -272,25 +434,32 @@ def upload_to_drive(local_path, folder_id, filename):
     creds = get_credentials()
     service = build("drive", "v3", credentials=creds)
 
-    query = f"name='{filename}' and '{folder_id}' in parents and trashed=false"
-    existing = service.files().list(q=query, fields="files(id)").execute().get("files", [])
-
-    media = MediaFileUpload(local_path, mimetype="text/html", resumable=False)
-
-    if existing:
-        file_id = existing[0]["id"]
-        service.files().update(fileId=file_id, media_body=media).execute()
-        print(f"  Drive updated: {filename} (id={file_id})")
-    else:
-        meta = {"name": filename, "parents": [folder_id]}
-        created = service.files().create(body=meta, media_body=media, fields="id").execute()
-        print(f"  Drive created: {filename} (id={created['id']})")
+    last_error = None
+    for attempt in range(3):
+        try:
+            query = f"name='{filename}' and '{folder_id}' in parents and trashed=false"
+            existing = service.files().list(q=query, fields="files(id)").execute().get("files", [])
+            media = MediaFileUpload(local_path, mimetype="text/html", resumable=False)
+            if existing:
+                file_id = existing[0]["id"]
+                service.files().update(fileId=file_id, media_body=media).execute()
+                print(f"  Drive updated: {filename} (id={file_id})")
+            else:
+                meta = {"name": filename, "parents": [folder_id]}
+                created = service.files().create(body=meta, media_body=media, fields="id").execute()
+                print(f"  Drive created: {filename} (id={created['id']})")
+            return True
+        except Exception as e:
+            last_error = e
+            print(f"  Upload attempt {attempt + 1} failed: {type(e).__name__}")
+            if attempt < 2:
+                time.sleep(5)
+    print(f"  Drive upload FAILED after 3 attempts: {last_error}")
+    return False
 
 
 def main():
     print("=== generate.py ===")
-    print("Sheet ID:", SHEET_ID)
-
     ss = connect()
     print("Connected:", ss.title)
 
@@ -301,26 +470,40 @@ def main():
         raw[tab] = read_tab(ss, tab)
         print(f"  {tab}: {len(raw[tab])} rows")
 
-    people = raw["People"]
-    tasks = build_tasks(raw["Tasks"], people)
-    defects = build_defects(raw["Defects"], people)
+    company_map, name_map = build_maps(raw["People"])
+    tasks = build_tasks(raw["Tasks"], company_map, name_map)
+    defects = build_defects(raw["Defects"], company_map, name_map)
     dependencies = build_dependencies(raw["Dependencies"])
     updates = build_updates(raw["Updates"])
-    kpis = compute_kpis(tasks, defects)
 
-    print("KPIs:", json.dumps(kpis))
+    print("Applying dependency cascade...")
+    tasks = apply_cascade(tasks, dependencies)
+
+    history = build_history(updates)
+    print(f"  History: {sum(len(v) for v in history.values())} entries across {len(history)} items")
+
+    print("Generating AI summaries...")
+    summaries = generate_summaries(tasks, defects, history)
 
     folder_id = config.get("drive_dashboard_folder_id")
 
-    print("Rendering executive...")
-    exec_path = render("executive", "executive", config, kpis, tasks, defects, dependencies, updates)
-    if folder_id:
-        upload_to_drive(exec_path, folder_id, "executive_dashboard.html")
+    def do_render(audience, role, t_list, d_list):
+        kpis = compute_kpis(t_list, d_list)
+        completion = compute_completion(t_list)
+        print(f"Rendering {audience}...")
+        p = render(audience, role, config, kpis, completion, t_list, d_list, dependencies, updates, history, summaries)
+        if folder_id:
+            upload_to_drive(p, folder_id, f"{audience}_dashboard.html")
 
-    print("Rendering tomato_farms...")
-    tf_path = render("tomato_farms", "tomato_farms", config, kpis, tasks, defects, dependencies, updates)
-    if folder_id:
-        upload_to_drive(tf_path, folder_id, "tomato_farms_dashboard.html")
+    # Generate Executive (All Data)
+    do_render("executive", "executive", tasks, defects)
+
+    # Generate Company Specific
+    for co in ["TomatoFarms", "MTG", "Subcon"]:
+        co_tasks = [t for t in tasks if t["owner_company"] == co]
+        co_defects = [d for d in defects if d["assigned_company"] == co]
+        if co_tasks or co_defects:
+            do_render(co.lower().replace(" ", "_"), co.lower().replace(" ", "_"), co_tasks, co_defects)
 
     print("Done.")
 

@@ -7,9 +7,10 @@
 <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
 <style>
 :root{
-  --bg:#0a0d12;--bg-elev:#11151c;--panel:#161b24;--border:#232a36;--border-strong:#2f3846;
-  --text:#e6edf3;--muted:#8b949e;--accent:#58a6ff;--green:#3fb950;--red:#f85149;
-  --orange:#f0883e;--yellow:#d29922;--purple:#a371f7;
+  --bg:#0a0d12;--bg-elev:#11151c;--panel:#161b24;--panel-2:#1c2230;--border:#232a36;--border-strong:#2f3846;
+  --text:#e6edf3;--muted:#8b949e;--accent:#58a6ff;--green:#3fb950;
+  --red:#e76f51; /* Terracotta: urgent but not screaming */
+  --orange:#f0883e;--yellow:#d29922;--purple:#a371f7;--cyan:#39c5cf;
   --radius:10px;--radius-sm:6px;
 }
 *{box-sizing:border-box}
@@ -18,7 +19,8 @@ html,body{margin:0;padding:0;background:var(--bg);color:var(--text);
   font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
 body{padding-bottom:60px}
 .wrap{max-width:1400px;margin:0 auto;padding:0 20px}
-.topbar{position:sticky;top:0;z-index:50;background:rgba(10,13,18,0.95);
+
+.topbar{position:sticky;top:0;z-index:40;background:rgba(10,13,18,0.95);
   backdrop-filter:blur(10px);border-bottom:1px solid var(--border);padding:14px 0}
 .topbar-inner{display:flex;align-items:center;gap:16px}
 .brand{display:flex;align-items:center;gap:10px}
@@ -33,46 +35,125 @@ body{padding-bottom:60px}
   text-transform:uppercase;letter-spacing:0.06em}
 .rag.green{background:rgba(63,185,80,0.15);color:var(--green);border:1px solid rgba(63,185,80,0.35)}
 .rag.amber{background:rgba(240,136,62,0.15);color:var(--orange);border:1px solid rgba(240,136,62,0.35)}
-.rag.red{background:rgba(248,81,73,0.15);color:var(--red);border:1px solid rgba(248,81,73,0.35)}
+.rag.red{background:rgba(231,111,81,0.15);color:var(--red);border:1px solid rgba(231,111,81,0.35)}
+
 .tabs{display:flex;gap:2px;border-bottom:1px solid var(--border);margin-top:14px;overflow-x:auto}
 .tab{padding:10px 16px;font-size:13px;cursor:pointer;color:var(--muted);border:none;background:none;
   font-family:inherit;border-bottom:2px solid transparent;white-space:nowrap}
 .tab:hover{color:var(--text)}
 .tab.active{color:var(--text);border-bottom-color:var(--accent);font-weight:600}
+
 .kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-top:18px}
 .kpi{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
-  padding:12px 14px;position:relative;overflow:hidden}
+  padding:12px 14px;position:relative;overflow:hidden;opacity:0;animation:fadeUp 0.4s ease forwards}
+.kpi:nth-child(1){animation-delay:0.02s}
+.kpi:nth-child(2){animation-delay:0.05s}
+.kpi:nth-child(3){animation-delay:0.08s}
+.kpi:nth-child(4){animation-delay:0.11s}
+.kpi:nth-child(5){animation-delay:0.14s}
+.kpi:nth-child(6){animation-delay:0.17s}
+.kpi:nth-child(7){animation-delay:0.20s}
+.kpi:nth-child(8){animation-delay:0.23s}
+@keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
 .kpi .lbl{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;font-weight:600}
 .kpi .val{font-size:22px;font-weight:700;margin-top:4px;font-variant-numeric:tabular-nums;letter-spacing:-0.02em}
-.kpi .val.green{color:var(--green)}
-.kpi .val.red{color:var(--red)}
-.kpi .val.orange{color:var(--orange)}
-.kpi .val.accent{color:var(--accent)}
+.kpi .val.green{color:var(--green)}.kpi .val.red{color:var(--red)}
+.kpi .val.orange{color:var(--orange)}.kpi .val.accent{color:var(--accent)}
 .kpi .hint{font-size:10px;color:var(--muted);margin-top:2px}
+
+.completion{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-top:14px}
+.completion .panel{margin-top:0}
+.comp-card{position:relative;overflow:hidden;padding:20px}
+.comp-card .label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;font-weight:600}
+.comp-card .date{font-size:26px;font-weight:700;margin-top:6px;font-variant-numeric:tabular-nums}
+.comp-card .sub{font-size:11px;color:var(--muted);margin-top:4px}
+.comp-card.best{border-left:3px solid var(--green)}
+.comp-card.likely{border-left:3px solid var(--accent)}
+.comp-card.worst{border-left:3px solid var(--red)}
+
 .panel{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
   padding:16px;margin-top:14px}
 .panel-title{font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;
   letter-spacing:0.08em;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center}
 .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}
 .grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-top:14px}
-@media(max-width:900px){.grid-2,.grid-3{grid-template-columns:1fr}}
+@media(max-width:900px){.grid-2,.grid-3,.completion{grid-template-columns:1fr}}
+
 table.data{width:100%;border-collapse:collapse;font-size:12px}
 table.data th{text-align:left;padding:8px 10px;color:var(--muted);font-weight:600;
   text-transform:uppercase;letter-spacing:0.05em;font-size:10px;border-bottom:1px solid var(--border)}
 table.data td{padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:top}
+table.data tr{cursor:pointer;transition:background 0.1s}
 table.data tr:hover td{background:var(--bg-elev)}
 table.data .pill{padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700;
   text-transform:uppercase;letter-spacing:0.05em}
 .pill.green{background:rgba(63,185,80,0.15);color:var(--green)}
-.pill.red{background:rgba(248,81,73,0.15);color:var(--red)}
+.pill.red{background:rgba(231,111,81,0.15);color:var(--red)}
 .pill.orange{background:rgba(240,136,62,0.15);color:var(--orange)}
 .pill.blue{background:rgba(88,166,255,0.15);color:var(--accent)}
 .pill.gray{background:rgba(139,148,158,0.15);color:var(--muted)}
 .pill.purple{background:rgba(163,113,247,0.15);color:var(--purple)}
+.ai-line{color:var(--muted);font-style:italic;font-size:11px;max-width:320px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
 .chart-wrap{position:relative;height:280px}
 .empty{color:var(--muted);padding:30px;text-align:center;font-size:13px}
 .footer{margin-top:40px;padding-top:20px;border-top:1px solid var(--border);
   font-size:11px;color:var(--muted);text-align:center}
+
+/* Side drawer */
+.drawer-bg{position:fixed;inset:0;background:rgba(0,0,0,0.55);opacity:0;pointer-events:none;
+  transition:opacity 0.2s;z-index:100}
+.drawer-bg.open{opacity:1;pointer-events:auto}
+.drawer{position:fixed;top:0;right:0;bottom:0;width:min(560px,95vw);background:var(--panel);
+  border-left:1px solid var(--border-strong);z-index:101;transform:translateX(100%);
+  transition:transform 0.28s cubic-bezier(0.32,0.72,0,1);display:flex;flex-direction:column;overflow:hidden}
+.drawer.open{transform:translateX(0)}
+.drawer-head{padding:18px 22px;border-bottom:1px solid var(--border);display:flex;
+  align-items:flex-start;gap:12px}
+.drawer-head .id{font-family:ui-monospace,SF Mono,Menlo,monospace;font-size:11px;color:var(--muted)}
+.drawer-head h2{margin:2px 0 0;font-size:18px;font-weight:600;line-height:1.3}
+.drawer-head .close{margin-left:auto;background:none;border:none;color:var(--muted);
+  font-size:22px;cursor:pointer;padding:0 8px;line-height:1}
+.drawer-head .close:hover{color:var(--text)}
+.drawer-body{padding:18px 22px;overflow-y:auto;flex:1}
+.drawer-section{margin-bottom:22px}
+.drawer-section h3{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;
+  letter-spacing:0.08em;margin:0 0 10px}
+.field-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.field{background:var(--bg-elev);border:1px solid var(--border);border-radius:var(--radius-sm);
+  padding:8px 10px}
+.field .k{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:2px}
+.field .v{font-size:13px;font-weight:500}
+.ai-summary{background:linear-gradient(135deg,rgba(88,166,255,0.08),rgba(163,113,247,0.08));
+  border:1px solid var(--border-strong);border-radius:var(--radius);padding:14px;
+  font-size:13px;line-height:1.6;color:var(--text)}
+.ai-summary .badge{display:inline-block;font-size:9px;font-weight:700;letter-spacing:0.08em;
+  color:var(--purple);background:rgba(163,113,247,0.15);padding:2px 6px;border-radius:4px;
+  margin-bottom:8px;text-transform:uppercase}
+.history-list{list-style:none;padding:0;margin:0}
+.history-item{position:relative;padding:0 0 14px 22px;border-left:1px solid var(--border);
+  margin-left:8px}
+.history-item::before{content:'';position:absolute;left:-4px;top:4px;width:7px;height:7px;
+  border-radius:50%;background:var(--accent);box-shadow:0 0 0 3px var(--panel)}
+.history-item .when{font-size:11px;color:var(--muted);font-family:ui-monospace,SF Mono,Menlo,monospace}
+.history-item .who{font-size:12px;font-weight:600;margin:2px 0}
+.history-item .change{font-size:12px;color:var(--text);margin-top:2px}
+.history-item .change .arrow{color:var(--muted);margin:0 6px}
+.history-item .change .old{color:var(--muted);text-decoration:line-through}
+.history-item .change .new{color:var(--green);font-weight:600}
+.history-item .note{font-size:11px;color:var(--muted);margin-top:4px;font-style:italic}
+.subtasks-list{list-style:none;padding:0;margin:0}
+.subtasks-list li{padding:8px 10px;background:var(--bg-elev);border:1px solid var(--border);
+  border-radius:var(--radius-sm);margin-bottom:6px;font-size:12px;cursor:pointer;
+  display:flex;justify-content:space-between;align-items:center}
+.subtasks-list li:hover{border-color:var(--border-strong)}
+
+.toast{position:fixed;top:20px;left:50%;transform:translateX(-50%) translateY(-120%);
+  background:var(--green);color:#fff;padding:12px 20px;border-radius:var(--radius);
+  font-size:13px;font-weight:600;z-index:300;transition:transform 0.3s;box-shadow:0 12px 32px rgba(0,0,0,0.5)}
+.toast.show{transform:translateX(-50%) translateY(0)}
+.toast.error{background:var(--red)}
 </style>
 </head>
 <body>
@@ -90,6 +171,16 @@ table.data .pill{padding:2px 8px;border-radius:999px;font-size:10px;font-weight:
         </div>
       </div>
       <div class="spacer"></div>
+      
+      {% if audience == 'executive' %}
+      <select id="companyFilter" onchange="filterByCompany()" style="background:var(--bg-elev); color:var(--text); border:1px solid var(--border); padding:6px 12px; border-radius:6px; font-family:inherit; font-size:12px; outline:none; cursor:pointer; margin-right:16px;">
+        <option value="all">All Companies</option>
+        <option value="TomatoFarms">TomatoFarms</option>
+        <option value="MTG">MTG</option>
+        <option value="Subcon">Subcon</option>
+      </select>
+      {% endif %}
+      
       <div class="person">{{ audience }}</div>
       <div class="rag" id="ragBadge">—</div>
     </div>
@@ -104,6 +195,7 @@ table.data .pill{padding:2px 8px;border-radius:999px;font-size:10px;font-weight:
 </div>
 
 <div class="wrap">
+  <div class="completion" id="completionRow"></div>
   <div class="kpi-grid" id="kpiGrid"></div>
 
   <div id="tab-overview" class="tab-content">
@@ -132,36 +224,135 @@ table.data .pill{padding:2px 8px;border-radius:999px;font-size:10px;font-weight:
   </div>
 
   <div id="tab-gantt" class="tab-content" style="display:none;">
-    <div class="panel"><div class="panel-title">Gantt</div><div id="ganttChart" style="height:600px;"></div></div>
+    <div class="panel">
+      <div class="panel-title">Gantt — reported forecast (solid), cascade (dashed)</div>
+      <!-- REMOVED hardcoded 700px height so Plotly can auto-expand -->
+      <div id="ganttChart" style="width:100%;"></div>
+    </div>
   </div>
 
   <div id="tab-activity" class="tab-content" style="display:none;">
     <div class="panel"><div class="panel-title">Updates log</div><div id="tblAllUpdates"></div></div>
   </div>
 
-  <div class="footer">
-    Generated {{ generated_at }} · Audience: {{ audience }}
-  </div>
+  <div class="footer">Generated {{ generated_at }} · Audience: {{ audience }}</div>
 </div>
+
+<div class="drawer-bg" id="drawerBg" onclick="closeDrawer()"></div>
+<div class="drawer" id="drawer">
+  <div class="drawer-head">
+    <div style="flex:1">
+      <div class="id" id="dId"></div>
+      <h2 id="dTitle"></h2>
+    </div>
+    <button class="close" onclick="closeDrawer()">×</button>
+  </div>
+  <div class="drawer-body" id="drawerBody"></div>
+</div>
+
+<div class="toast" id="toast"></div>
 
 <script>
 const DATA = JSON.parse(document.getElementById('data').textContent);
+const ORIGINAL_TASKS = [...(DATA.tasks || [])];
+const ORIGINAL_DEFECTS = [...(DATA.defects || [])];
+const ORIGINAL_KPIS = {...DATA.kpis};
+const ORIGINAL_COMPLETION = {...DATA.completion};
+
 const charts = {};
+const taskMap = {};
+const defectMap = {};
+
+function buildMaps(tasks, defects) {
+    for(let k in taskMap) delete taskMap[k];
+    for(let k in defectMap) delete defectMap[k];
+    tasks.forEach(t => taskMap[t.id] = t);
+    defects.forEach(d => defectMap[d.id] = d);
+}
+buildMaps(ORIGINAL_TASKS, ORIGINAL_DEFECTS);
 
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
-
-function kpiCard(lbl,val,cls,hint){
-  return `<div class="kpi"><div class="lbl">${lbl}</div><div class="val ${cls||''}">${val}</div>${hint?`<div class="hint">${hint}</div>`:''}</div>`;
-}
-
 function destroyChart(k){if(charts[k]){try{charts[k].destroy();}catch(e){}delete charts[k];}}
-
 function applyChartDefaults(){
   if(typeof Chart==='undefined')return;
   Chart.defaults.color='#e6edf3';
   Chart.defaults.borderColor='#232a36';
   Chart.defaults.font.family='-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif';
   Chart.defaults.font.size=11;
+}
+function kpiCard(lbl,val,cls,hint){
+  return `<div class="kpi"><div class="lbl">${lbl}</div><div class="val ${cls||''}">${val}</div>${hint?`<div class="hint">${hint}</div>`:''}</div>`;
+}
+
+function computeClientKPIs(tasks, defects) {
+    const today = new Date().toISOString().slice(0,10);
+    const total = tasks.length;
+    const complete = tasks.filter(t => t.status === 'Complete').length;
+    const in_progress = tasks.filter(t => t.status === 'In Progress').length;
+    const blocked = tasks.filter(t => t.status === 'Blocked').length;
+    
+    let overdue = 0;
+    tasks.forEach(t => {
+        if(t.forecast_end && t.forecast_end < today && t.status !== 'Complete') overdue++;
+    });
+    
+    const slips = tasks.map(t => t.slip_days || 0).filter(s => s > 0);
+    const avg_slip = slips.length ? Math.round((slips.reduce((a,b)=>a+b, 0) / slips.length) * 10) / 10 : 0;
+    
+    const open_defects = defects.filter(d => d.is_open).length;
+    const critical_defects = defects.filter(d => d.is_open && d.severity === 'Critical').length;
+    
+    let health = 'green';
+    if (critical_defects > 0 || overdue > 5) health = 'red';
+    else if (overdue > 0 || avg_slip > 7) health = 'amber';
+
+    return { total_tasks: total, complete, in_progress, blocked, overdue, avg_slip, open_defects, critical_defects, health };
+}
+
+function computeClientCompletion(tasks) {
+    if(!tasks.length) return {best:'', likely:'', worst:'', avg_slip:0};
+    let maxBase = '', maxCasc = '', maxWorst = '';
+    let slips = tasks.map(t => t.slip_days || 0).filter(s => s > 0);
+    let avg_slip = slips.length ? slips.reduce((a,b)=>a+b,0) / slips.length : 0;
+    
+    tasks.forEach(t => {
+        if(t.baseline_end && t.baseline_end > maxBase) maxBase = t.baseline_end;
+        if(t.cascade_end && t.cascade_end > maxCasc) maxCasc = t.cascade_end;
+        
+        if(t.baseline_end) {
+            let d = new Date(t.baseline_end);
+            d.setDate(d.getDate() + Math.round(avg_slip));
+            let w = d.toISOString().slice(0,10);
+            if(w > maxWorst) maxWorst = w;
+        }
+    });
+    return { best: maxBase, likely: maxCasc, worst: maxWorst, avg_slip: Math.round(avg_slip*10)/10 };
+}
+
+function filterByCompany() {
+    const co = document.getElementById('companyFilter').value;
+    if(co === 'all') {
+        DATA.tasks = ORIGINAL_TASKS;
+        DATA.defects = ORIGINAL_DEFECTS;
+        DATA.kpis = ORIGINAL_KPIS;
+        DATA.completion = ORIGINAL_COMPLETION;
+    } else {
+        DATA.tasks = ORIGINAL_TASKS.filter(t => t.owner_company === co);
+        DATA.defects = ORIGINAL_DEFECTS.filter(d => d.assigned_company === co);
+        DATA.kpis = computeClientKPIs(DATA.tasks, DATA.defects);
+        DATA.completion = computeClientCompletion(DATA.tasks);
+    }
+    
+    buildMaps(DATA.tasks, DATA.defects);
+    
+    renderHeader();
+    renderCompletion();
+    renderKPIs();
+    renderOverview();
+    renderTasks();
+    renderDefects();
+    renderGantt();
+    renderAllUpdates();
 }
 
 function renderHeader(){
@@ -171,6 +362,29 @@ function renderHeader(){
   const rag=document.getElementById('ragBadge');
   rag.className='rag '+h;
   rag.textContent=h==='green'?'On track':h==='amber'?'At risk':'Critical';
+}
+
+function renderCompletion(){
+  const c = DATA.completion || {};
+  if(!c.likely) { document.getElementById('completionRow').innerHTML = ''; return; }
+  const el = document.getElementById('completionRow');
+  el.innerHTML = `
+    <div class="panel comp-card best">
+      <div class="label">Best case (baseline)</div>
+      <div class="date" style="color:var(--green)">${esc(c.best)||'—'}</div>
+      <div class="sub">If everything finishes on plan</div>
+    </div>
+    <div class="panel comp-card likely">
+      <div class="label">Most likely (cascade)</div>
+      <div class="date" style="color:var(--accent)">${esc(c.likely)||'—'}</div>
+      <div class="sub">With current reported slips propagated</div>
+    </div>
+    <div class="panel comp-card worst">
+      <div class="label">Risk case (+${esc(c.avg_slip)}d avg slip)</div>
+      <div class="date" style="color:var(--red)">${esc(c.worst)||'—'}</div>
+      <div class="sub">Historical average slip applied to remaining</div>
+    </div>
+  `;
 }
 
 function renderKPIs(){
@@ -188,6 +402,39 @@ function renderKPIs(){
   document.getElementById('kpiGrid').innerHTML=h;
 }
 
+function renderTaskTable(rows,compact){
+  if(!rows.length)return '<div class="empty">No tasks.</div>';
+  let h='<table class="data"><thead><tr><th>ID</th><th>Name</th><th>Owner</th><th>Status</th><th>Forecast</th><th>Slip</th><th>AI summary</th></tr></thead><tbody>';
+  rows.forEach(t=>{
+    const sd=t.slip_days||0;
+    const slipCls=sd>30?'red':sd>7?'orange':sd>0?'orange':'green';
+    const stCls=t.status==='Complete'?'green':t.status==='Blocked'?'red':t.status==='In Progress'?'blue':'gray';
+    const summary = (DATA.summaries && DATA.summaries[t.id]) || '';
+    h+=`<tr onclick="openTask('${esc(t.id)}')">
+      <td><code>${esc(t.id)}</code></td>
+      <td>${esc(t.name)}${t.critical?' <span class="pill red">CP</span>':''}</td>
+      <td>${esc(t.owner_name || t.owner_id)}</td>
+      <td><span class="pill ${stCls}">${esc(t.status)}</span></td>
+      <td>${esc(t.forecast_end)}</td>
+      <td><span class="pill ${slipCls}">${sd>0?'+':''}${sd}d</span></td>
+      <td><div class="ai-line">${esc(summary)}</div></td>
+    </tr>`;
+  });
+  return h+'</tbody></table>';
+}
+
+function renderUpdatesTable(rows){
+  if(!rows.length)return '<div class="empty">No recent updates.</div>';
+  let h='<table class="data"><thead><tr><th>When</th><th>Entity</th><th>Field</th><th>Change</th></tr></thead><tbody>';
+  rows.forEach(u=>{
+    const click = u.entity_type==='task' ? `onclick="openTask('${esc(u.entity_id)}')"` :
+                  u.entity_type==='defect' ? `onclick="openDefect('${esc(u.entity_id)}')"` : '';
+    h+=`<tr ${click}><td>${esc(u.timestamp)}</td><td><code>${esc(u.entity_id)}</code></td>
+      <td>${esc(u.field)}</td><td>${esc(u.old_value)} → ${esc(u.new_value)}</td></tr>`;
+  });
+  return h+'</tbody></table>';
+}
+
 function renderOverview(){
   applyChartDefaults();
   const tasks=DATA.tasks||[];
@@ -197,7 +444,7 @@ function renderOverview(){
   charts.status=new Chart(document.getElementById('chStatus'),{
     type:'doughnut',
     data:{labels:Object.keys(stCounts),datasets:[{data:Object.values(stCounts),
-      backgroundColor:['#3fb950','#58a6ff','#f85149','#f0883e','#8b949e','#d29922','#a371f7'],
+      backgroundColor:['#3fb950','#58a6ff','#e76f51','#f0883e','#8b949e','#d29922','#a371f7'],
       borderColor:'#0e1117',borderWidth:2}]},
     options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom'}}}
   });
@@ -207,7 +454,7 @@ function renderOverview(){
   charts.priority=new Chart(document.getElementById('chPriority'),{
     type:'bar',
     data:{labels:Object.keys(prCounts),datasets:[{label:'Tasks',data:Object.values(prCounts),
-      backgroundColor:['#f85149','#f0883e','#58a6ff','#8b949e']}]},
+      backgroundColor:['#e76f51','#f0883e','#58a6ff','#8b949e']}]},
     options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
       scales:{y:{beginAtZero:true,ticks:{precision:0}}}}
   });
@@ -221,45 +468,13 @@ function renderOverview(){
   charts.slip=new Chart(document.getElementById('chSlip'),{
     type:'bar',
     data:{labels:Object.keys(buckets),datasets:[{label:'Tasks',data:Object.values(buckets),
-      backgroundColor:['#3fb950','#d29922','#f0883e','#f85149','#f85149']}]},
+      backgroundColor:['#3fb950','#d29922','#f0883e','#e76f51','#e76f51']}]},
     options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
       scales:{y:{beginAtZero:true,ticks:{precision:0}}}}
   });
   const crit=tasks.filter(t=>t.critical).sort((a,b)=>(b.slip_days||0)-(a.slip_days||0)).slice(0,10);
   document.getElementById('tblCritical').innerHTML=renderTaskTable(crit,true);
   document.getElementById('tblUpdates').innerHTML=renderUpdatesTable((DATA.updates||[]).slice(0,15));
-}
-
-function renderTaskTable(rows,compact){
-  if(!rows.length)return '<div class="empty">No tasks.</div>';
-  let h='<table class="data"><thead><tr><th>ID</th><th>Name</th><th>Owner</th><th>Status</th>'+
-    (compact?'':'<th>Priority</th><th>Baseline</th>')+
-    '<th>Forecast</th><th>Slip</th></tr></thead><tbody>';
-  rows.forEach(t=>{
-    const sd=t.slip_days||0;
-    const slipCls=sd>30?'red':sd>7?'orange':sd>0?'orange':'green';
-    const stCls=t.status==='Complete'?'green':t.status==='Blocked'?'red':t.status==='In Progress'?'blue':'gray';
-    h+=`<tr>
-      <td><code>${esc(t.id)}</code></td>
-      <td>${esc(t.name)}${t.critical?' <span class="pill red">CP</span>':''}</td>
-      <td>${esc(t.owner_id)}</td>
-      <td><span class="pill ${stCls}">${esc(t.status)}</span></td>
-      ${compact?'':`<td>${esc(t.priority)}</td><td>${esc(t.baseline_end)}</td>`}
-      <td>${esc(t.forecast_end)}</td>
-      <td><span class="pill ${slipCls}">${sd>0?'+':''}${sd}d</span></td>
-    </tr>`;
-  });
-  return h+'</tbody></table>';
-}
-
-function renderUpdatesTable(rows){
-  if(!rows.length)return '<div class="empty">No recent updates.</div>';
-  let h='<table class="data"><thead><tr><th>When</th><th>Entity</th><th>Field</th><th>Change</th></tr></thead><tbody>';
-  rows.forEach(u=>{
-    h+=`<tr><td>${esc(u.timestamp)}</td><td><code>${esc(u.entity_id)}</code></td>
-      <td>${esc(u.field)}</td><td>${esc(u.old_value)} → ${esc(u.new_value)}</td></tr>`;
-  });
-  return h+'</tbody></table>';
 }
 
 function renderTasks(){
@@ -280,7 +495,7 @@ function renderDefects(){
   charts.defsev=new Chart(document.getElementById('chDefSev'),{
     type:'bar',
     data:{labels:Object.keys(sevCounts),datasets:[{label:'Open',data:Object.values(sevCounts),
-      backgroundColor:['#f85149','#f0883e','#58a6ff','#8b949e']}]},
+      backgroundColor:['#e76f51','#f0883e','#58a6ff','#8b949e']}]},
     options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
       scales:{y:{beginAtZero:true,ticks:{precision:0}}}}
   });
@@ -295,7 +510,7 @@ function renderDefects(){
   charts.age=new Chart(document.getElementById('chAge'),{
     type:'bar',
     data:{labels:Object.keys(ageBuckets),datasets:[{label:'Defects',data:Object.values(ageBuckets),
-      backgroundColor:['#3fb950','#d29922','#f0883e','#f85149','#f85149']}]},
+      backgroundColor:['#3fb950','#d29922','#f0883e','#e76f51','#e76f51']}]},
     options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
       scales:{y:{beginAtZero:true,ticks:{precision:0}}}}
   });
@@ -316,7 +531,7 @@ function renderDefects(){
   charts.pareto=new Chart(document.getElementById('chPareto'),{
     data:{labels:labels,datasets:[
       {type:'bar',label:'Count',data:counts,backgroundColor:'#58a6ff',yAxisID:'y'},
-      {type:'line',label:'Cum %',data:cum,borderColor:'#f85149',yAxisID:'y1',tension:0.2}
+      {type:'line',label:'Cum %',data:cum,borderColor:'#e76f51',yAxisID:'y1',tension:0.2}
     ]},
     options:{responsive:true,maintainAspectRatio:false,
       scales:{y:{beginAtZero:true,position:'left',ticks:{precision:0}},
@@ -324,18 +539,19 @@ function renderDefects(){
       plugins:{legend:{position:'bottom'}}}
   });
 
-  let h='<table class="data"><thead><tr><th>ID</th><th>Title</th><th>Severity</th><th>Status</th><th>Assigned</th><th>Age</th><th>Linked</th></tr></thead><tbody>';
+  let h='<table class="data"><thead><tr><th>ID</th><th>Title</th><th>Severity</th><th>Status</th><th>Assigned</th><th>Age</th><th>AI summary</th></tr></thead><tbody>';
   d.forEach(x=>{
     const sevCls=x.severity==='Critical'?'red':x.severity==='Major'?'orange':x.severity==='Minor'?'blue':'gray';
     const stCls=x.is_open?'orange':'green';
-    h+=`<tr>
+    const summary = (DATA.summaries && DATA.summaries[x.id]) || '';
+    h+=`<tr onclick="openDefect('${esc(x.id)}')">
       <td><code>${esc(x.id)}</code></td>
       <td>${esc(x.title)}</td>
       <td><span class="pill ${sevCls}">${esc(x.severity)}</span></td>
       <td><span class="pill ${stCls}">${esc(x.status)}</span></td>
-      <td>${esc(x.assigned_to)}</td>
+      <td>${esc(x.assigned_name || x.assigned_to)}</td>
       <td>${x.age_days!=null?x.age_days+'d':'—'}</td>
-      <td>${esc(x.linked_task_id)}</td>
+      <td><div class="ai-line">${esc(summary)}</div></td>
     </tr>`;
   });
   document.getElementById('tblDefects').innerHTML=h+'</tbody></table>';
@@ -345,58 +561,244 @@ function renderGantt(){
   if(typeof Plotly==='undefined')return;
   const tasks=DATA.tasks||[];
   if(!tasks.length){document.getElementById('ganttChart').innerHTML='<div class="empty">No tasks.</div>';return;}
-  const traces=[];
-  const yOrder=tasks.map(t=>t.id);
-  const today=new Date().toISOString().slice(0,10);
+  
+  const sortedTasks = [...tasks].sort((a,b) => {
+    const aDate = a.baseline_start || a.forecast_start || '';
+    const bDate = b.baseline_start || b.forecast_start || '';
+    return aDate.localeCompare(bDate);
+  });
+  
+  const today = new Date().toISOString().slice(0,10);
+  const traces = [];
 
-  tasks.forEach(t=>{
-    if(t.baseline_start&&t.baseline_end){
-      traces.push({type:'scatter',mode:'lines',x:[t.baseline_start,t.baseline_end],y:[t.id,t.id],
-        line:{color:'#4a525c',width:8},name:'Baseline',text:['Baseline',t.name],
-        hoverinfo:'text+name',showlegend:false});
-    }
-    if(t.forecast_start&&t.forecast_end){
-      traces.push({type:'scatter',mode:'lines',x:[t.forecast_start,t.forecast_end],y:[t.id,t.id],
-        line:{color:t.critical?'#f85149':'#58a6ff',width:10},name:'Forecast',
-        text:['Forecast',t.name],hoverinfo:'text+name',showlegend:false});
-    }
-    if(t.actual_start&&t.actual_finish){
-      traces.push({type:'scatter',mode:'lines',x:[t.actual_start,t.actual_finish],y:[t.id,t.id],
-        line:{color:'#3fb950',width:6},name:'Actual',
-        text:['Actual',t.name],hoverinfo:'text+name',showlegend:false});
+  const baseY = sortedTasks.map((t, i) => i - 0.24);
+  const foreY = sortedTasks.map((t, i) => i);
+  const cascY = sortedTasks.map((t, i) => i + 0.24);
+  const actY  = sortedTasks.map((t, i) => i + 0.24);
+
+  const baseBar = { 
+    type: 'bar', orientation: 'h', y: baseY, x: [], base: [], width: 0.18, 
+    marker: {color: '#4a525c'}, name: 'Baseline', hovertext: [], hoverinfo: 'text' 
+  };
+  sortedTasks.forEach(t => {
+    if (t.baseline_start && t.baseline_end) {
+      const s = new Date(t.baseline_start);
+      const e = new Date(t.baseline_end);
+      baseBar.x.push((e - s) * 1); 
+      baseBar.base.push(t.baseline_start);
+      baseBar.hovertext.push(`<b>${t.name}</b><br>Baseline: ${t.baseline_start} → ${t.baseline_end}`);
+    } else {
+      baseBar.x.push(0); baseBar.base.push(t.baseline_start || today); baseBar.hovertext.push('');
     }
   });
+  traces.push(baseBar);
 
-  traces.push({type:'scatter',mode:'lines',x:[null,null],y:[null,null],
-    line:{color:'#4a525c',width:8},name:'Baseline',showlegend:true});
-  traces.push({type:'scatter',mode:'lines',x:[null,null],y:[null,null],
-    line:{color:'#58a6ff',width:10},name:'Forecast',showlegend:true});
-  traces.push({type:'scatter',mode:'lines',x:[null,null],y:[null,null],
-    line:{color:'#f85149',width:10},name:'Forecast (critical)',showlegend:true});
-  traces.push({type:'scatter',mode:'lines',x:[null,null],y:[null,null],
-    line:{color:'#3fb950',width:6},name:'Actual',showlegend:true});
-
-  const layout={
-    paper_bgcolor:'#0e1117',plot_bgcolor:'#0e1117',
-    font:{color:'#e6edf3',size:11},
-    showlegend:true,
-    legend:{orientation:'h',yanchor:'bottom',y:1.02,xanchor:'left',x:0,
-      bgcolor:'rgba(0,0,0,0)',font:{size:10}},
-    margin:{l:100,r:20,t:60,b:40},
-    xaxis:{type:'date',gridcolor:'#232a34',zerolinecolor:'#232a34'},
-    yaxis:{categoryorder:'array',categoryarray:yOrder.slice().reverse(),
-      gridcolor:'#1a2029',tickfont:{size:10}},
-    shapes:[{type:'line',x0:today,x1:today,y0:0,y1:1,yref:'paper',
-      line:{color:'#f85149',width:2,dash:'dash'}}],
-    height:Math.max(400,tasks.length*26+120)
+  const foreBar = { 
+    type: 'bar', orientation: 'h', y: foreY, x: [], base: [], width: 0.3, 
+    marker: {color: []}, name: 'Forecast', hovertext: [], hoverinfo: 'text' 
   };
-  Plotly.newPlot('ganttChart',traces,layout,{displayModeBar:false,responsive:true});
+  sortedTasks.forEach(t => {
+    if (t.forecast_start && t.forecast_end) {
+      const s = new Date(t.forecast_start);
+      const e = new Date(t.forecast_end);
+      foreBar.x.push((e - s) * 1);
+      foreBar.base.push(t.forecast_start);
+      foreBar.hovertext.push(`<b>${t.name}</b><br>Forecast: ${t.forecast_start} → ${t.forecast_end}<br>Status: ${t.status} (${t.percent}%)`);
+      foreBar.marker.color.push(t.critical ? '#e76f51' : '#58a6ff');
+    } else {
+      foreBar.x.push(0); foreBar.base.push(t.forecast_start || today); foreBar.hovertext.push('');
+      foreBar.marker.color.push('#000000');
+    }
+  });
+  traces.push(foreBar);
+
+  const cascBar = { 
+    type: 'bar', orientation: 'h', y: cascY, x: [], base: [], width: 0.18, 
+    marker: {color: '#f0883e'}, name: 'Cascade (dependency)', hovertext: [], hoverinfo: 'text' 
+  };
+  sortedTasks.forEach(t => {
+    if (t.cascade_start && t.cascade_end && (t.cascade_start !== t.forecast_start || t.cascade_end !== t.forecast_end)) {
+      const s = new Date(t.cascade_start);
+      const e = new Date(t.cascade_end);
+      cascBar.x.push((e - s) * 1);
+      cascBar.base.push(t.cascade_start);
+      cascBar.hovertext.push(`<b>${t.name}</b><br>Cascade: ${t.cascade_start} → ${t.cascade_end}`);
+    } else {
+      cascBar.x.push(0); cascBar.base.push(t.cascade_start || today); cascBar.hovertext.push('');
+    }
+  });
+  traces.push(cascBar);
+
+  const actBar = {
+    type: 'bar', orientation: 'h', y: actY, x: [], base: [], width: 0.14, 
+    marker: {color: '#3fb950'}, name: 'Actual', hovertext: [], hoverinfo: 'text'
+  };
+  sortedTasks.forEach(t => {
+    if (t.actual_start && t.actual_finish) {
+      const s = new Date(t.actual_start);
+      const e = new Date(t.actual_finish);
+      actBar.x.push((e - s) * 1);
+      actBar.base.push(t.actual_start);
+      actBar.hovertext.push(`<b>${t.name}</b><br>Actual: ${t.actual_start} → ${t.actual_finish}`);
+    } else {
+      actBar.x.push(0); actBar.base.push(t.actual_start || today); actBar.hovertext.push('');
+    }
+  });
+  traces.push(actBar);
+
+  const layout = {
+    paper_bgcolor: '#0e1117', plot_bgcolor: '#0e1117',
+    font: { color: '#e6edf3', size: 11 },
+    barmode: 'overlay',
+    bargap: 0,
+    showlegend: true,
+    legend: { orientation: 'h', yanchor: 'bottom', y: 1.02, xanchor: 'left', x: 0, bgcolor: 'rgba(0,0,0,0)', font: {size: 10} },
+    margin: { l: 80, r: 20, t: 60, b: 40 },
+    xaxis: { type: 'date', gridcolor: '#232a34', zerolinecolor: '#232a34', tickformat: '%b %Y' },
+    yaxis: {
+      tickvals: sortedTasks.map((t, i) => i),
+      ticktext: sortedTasks.map(t => t.id),
+      autorange: 'reversed',
+      gridcolor: '#1a2029',
+      tickfont: { size: 10 }
+    },
+    shapes: [
+      { type: 'line', x0: today, x1: today, y0: 0, y1: 1, yref: 'paper', line: { color: '#e76f51', width: 2, dash: 'dash' } }
+    ],
+    height: Math.max(600, sortedTasks.length * 40 + 150)
+  };
+  Plotly.newPlot('ganttChart', traces, layout, {displayModeBar: false, responsive: true});
 }
 
 function renderAllUpdates(){
   const rows=DATA.updates||[];
   document.getElementById('tblAllUpdates').innerHTML=renderUpdatesTable(rows);
 }
+
+function openTask(id){
+  const t = taskMap[id];
+  if(!t) return;
+  const sub = (DATA.tasks||[]).filter(x => x.parent_id === id);
+  const hist = (DATA.history && DATA.history[id]) || [];
+  const sum = (DATA.summaries && DATA.summaries[id]) || 'No AI summary available.';
+
+  document.getElementById('dId').textContent = id;
+  document.getElementById('dTitle').textContent = t.name;
+
+  let html = '';
+  html += `<div class="drawer-section"><h3>AI summary</h3>
+    <div class="ai-summary"><span class="badge">AI</span><div>${esc(sum)}</div></div></div>`;
+
+  html += `<div class="drawer-section"><h3>Details</h3>
+    <div class="field-grid">
+      <div class="field"><div class="k">Status</div><div class="v">${esc(t.status)} (${t.percent}%)</div></div>
+      <div class="field"><div class="k">Owner</div><div class="v">${esc(t.owner_name || t.owner_id)}</div></div>
+      <div class="field"><div class="k">Priority</div><div class="v">${esc(t.priority)}${t.critical?' · Critical path':''}</div></div>
+      <div class="field"><div class="k">Baseline</div><div class="v">${esc(t.baseline_start)} → ${esc(t.baseline_end)}</div></div>
+      <div class="field"><div class="k">Forecast</div><div class="v">${esc(t.forecast_start)} → ${esc(t.forecast_end)}</div></div>
+      <div class="field"><div class="k">Cascade</div><div class="v">${esc(t.cascade_start)} → ${esc(t.cascade_end)}</div></div>
+      <div class="field"><div class="k">Slip</div><div class="v">${t.slip_days>0?'+':''}${t.slip_days} days</div></div>
+      <div class="field"><div class="k">Cascade slip</div><div class="v">${t.cascade_slip_days>0?'+':''}${t.cascade_slip_days} days</div></div>
+    </div></div>`;
+
+  if(t.description){
+    html += `<div class="drawer-section"><h3>Description</h3>
+      <div style="font-size:13px;line-height:1.6;color:var(--text)">${esc(t.description)}</div></div>`;
+  }
+
+  if(sub.length){
+    html += `<div class="drawer-section"><h3>Subtasks (${sub.length})</h3><ul class="subtasks-list">`;
+    sub.forEach(s => {
+      html += `<li onclick="openTask('${esc(s.id)}')">
+        <span>${esc(s.name)}</span>
+        <span class="pill ${s.status==='Complete'?'green':s.status==='Blocked'?'red':'blue'}">${esc(s.status)}</span>
+      </li>`;
+    });
+    html += `</ul></div>`;
+  }
+
+  html += `<div class="drawer-section"><h3>History (${hist.length})</h3>`;
+  if(!hist.length){
+    html += `<div class="empty">No updates recorded yet.</div>`;
+  } else {
+    html += `<ul class="history-list">`;
+    hist.slice(0,50).forEach(u => {
+      html += `<li class="history-item">
+        <div class="when">${esc(u.timestamp)}</div>
+        <div class="who">${esc(u.person_id)} · ${esc(u.field)}</div>
+        <div class="change"><span class="old">${esc(u.old_value)}</span><span class="arrow">→</span><span class="new">${esc(u.new_value)}</span></div>
+        ${u.notes ? `<div class="note">${esc(u.notes)}</div>` : ''}
+      </li>`;
+    });
+    html += `</ul>`;
+  }
+  html += `</div>`;
+
+  document.getElementById('drawerBody').innerHTML = html;
+  document.getElementById('drawer').classList.add('open');
+  document.getElementById('drawerBg').classList.add('open');
+}
+
+function openDefect(id){
+  const d = defectMap[id];
+  if(!d) return;
+  const hist = (DATA.history && DATA.history[id]) || [];
+  const sum = (DATA.summaries && DATA.summaries[id]) || 'No AI summary available.';
+
+  document.getElementById('dId').textContent = id;
+  document.getElementById('dTitle').textContent = d.title;
+
+  let html = '';
+  html += `<div class="drawer-section"><h3>AI summary</h3>
+    <div class="ai-summary"><span class="badge">AI</span><div>${esc(sum)}</div></div></div>`;
+
+  html += `<div class="drawer-section"><h3>Details</h3>
+    <div class="field-grid">
+      <div class="field"><div class="k">Status</div><div class="v">${esc(d.status)}</div></div>
+      <div class="field"><div class="k">Severity</div><div class="v">${esc(d.severity)}</div></div>
+      <div class="field"><div class="k">Priority</div><div class="v">${esc(d.priority)}</div></div>
+      <div class="field"><div class="k">Assigned</div><div class="v">${esc(d.assigned_name || d.assigned_to)}</div></div>
+      <div class="field"><div class="k">Detected</div><div class="v">${esc(d.detected_at)}</div></div>
+      <div class="field"><div class="k">Age</div><div class="v">${d.age_days!=null?d.age_days+' days':'—'}</div></div>
+      <div class="field"><div class="k">Environment</div><div class="v">${esc(d.environment)}</div></div>
+      <div class="field"><div class="k">Linked task</div><div class="v">${esc(d.linked_task_id)}</div></div>
+      <div class="field"><div class="k">Root cause</div><div class="v">${esc(d.root_cause)||'—'}</div></div>
+      <div class="field"><div class="k">Corrective action</div><div class="v">${esc(d.corrective_action)||'—'}</div></div>
+    </div></div>`;
+
+  if(d.description){
+    html += `<div class="drawer-section"><h3>Description</h3>
+      <div style="font-size:13px;line-height:1.6;color:var(--text)">${esc(d.description)}</div></div>`;
+  }
+
+  html += `<div class="drawer-section"><h3>History (${hist.length})</h3>`;
+  if(!hist.length){
+    html += `<div class="empty">No updates recorded yet.</div>`;
+  } else {
+    html += `<ul class="history-list">`;
+    hist.slice(0,50).forEach(u => {
+      html += `<li class="history-item">
+        <div class="when">${esc(u.timestamp)}</div>
+        <div class="who">${esc(u.person_id)} · ${esc(u.field)}</div>
+        <div class="change"><span class="old">${esc(u.old_value)}</span><span class="arrow">→</span><span class="new">${esc(u.new_value)}</span></div>
+        ${u.notes ? `<div class="note">${esc(u.notes)}</div>` : ''}
+      </li>`;
+    });
+    html += `</ul>`;
+  }
+  html += `</div>`;
+
+  document.getElementById('drawerBody').innerHTML = html;
+  document.getElementById('drawer').classList.add('open');
+  document.getElementById('drawerBg').classList.add('open');
+}
+
+function closeDrawer(){
+  document.getElementById('drawer').classList.remove('open');
+  document.getElementById('drawerBg').classList.remove('open');
+}
+
+document.addEventListener('keydown', e => { if(e.key === 'Escape') closeDrawer(); });
 
 document.getElementById('tabs').addEventListener('click',function(e){
   const b=e.target.closest('.tab');
@@ -410,6 +812,7 @@ document.getElementById('tabs').addEventListener('click',function(e){
 });
 
 renderHeader();
+renderCompletion();
 renderKPIs();
 renderOverview();
 renderTasks();
