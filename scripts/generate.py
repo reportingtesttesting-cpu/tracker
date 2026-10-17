@@ -155,12 +155,25 @@ def build_defects(defects_df, company_map, name_map):
     for _, r in defects_df.iterrows():
         if not r.get("defect_id"):
             continue
-        assigned = str(r.get("assigned_to", ""))
+        
+        assigned_raw = str(r.get("assigned_to", ""))
+        assigned_ids = [x.strip() for x in assigned_raw.split(",") if x.strip()]
+        
+        companies = set()
+        names = set()
+        for aid in assigned_ids:
+            if aid in company_map: companies.add(company_map[aid])
+            if aid in name_map: names.add(name_map[aid])
+            
+        assigned_name = ", ".join(names) if names else assigned_raw
+        assigned_company = ", ".join(companies) if companies else ""
+
         det = parse_date(r.get("detected_at"))
         clo = parse_date(r.get("closed_at"))
         age = (today - det).days if det else None
         mttr = (clo - det).days if (det and clo) else None
         status = str(r.get("status", "New"))
+        
         out.append({
             "id": str(r.get("defect_id")),
             "title": str(r.get("title", "")),
@@ -168,9 +181,9 @@ def build_defects(defects_df, company_map, name_map):
             "severity": str(r.get("severity", "Minor")),
             "priority": str(r.get("priority", "P2")),
             "status": status,
-            "assigned_to": assigned,
-            "assigned_name": name_map.get(assigned, assigned),
-            "assigned_company": company_map.get(assigned, ""),
+            "assigned_to": assigned_raw,
+            "assigned_name": assigned_name,
+            "assigned_company": assigned_company,
             "detected_at": str(r.get("detected_at", ""))[:10],
             "closed_at": str(r.get("closed_at", ""))[:10],
             "root_cause": str(r.get("root_cause", "")),
@@ -228,8 +241,7 @@ def build_history(updates):
     history = {}
     for u in updates:
         eid = u["entity_id"]
-        if not eid:
-            continue
+        if not eid: continue
         history.setdefault(eid, []).append(u)
     return history
 
@@ -244,21 +256,18 @@ def apply_cascade(tasks, dependencies):
 
     preds_of = {}
     for d in dependencies:
-        if d["type"] != "FS":
-            continue
+        if d["type"] != "FS": continue
         preds_of.setdefault(d["successor_id"], []).append(d)
 
     for _ in range(50):
         changed = False
         for t in tasks:
             preds = preds_of.get(t["id"], [])
-            if not preds or not t["_cs"] or not t["_ce"]:
-                continue
+            if not preds or not t["_cs"] or not t["_ce"]: continue
             latest = None
             for d in preds:
                 p = task_map.get(d["predecessor_id"])
-                if not p or not p["_ce"]:
-                    continue
+                if not p or not p["_ce"]: continue
                 candidate = p["_ce"] + timedelta(days=d["lag"])
                 if latest is None or candidate > latest:
                     latest = candidate
@@ -267,37 +276,29 @@ def apply_cascade(tasks, dependencies):
                 t["_cs"] = latest
                 t["_ce"] = t["_ce"] + timedelta(days=delta)
                 changed = True
-        if not changed:
-            break
+        if not changed: break
 
     for t in tasks:
         if t["_cs"] and t["_ce"]:
             t["cascade_start"] = t["_cs"].isoformat()
             t["cascade_end"] = t["_ce"].isoformat()
             be = parse_date(t.get("baseline_end"))
-            if be:
-                t["cascade_slip_days"] = (t["_ce"] - be).days
+            if be: t["cascade_slip_days"] = (t["_ce"] - be).days
         t.pop("_cs", None)
         t.pop("_ce", None)
-
     return tasks
 
 
 def compute_completion(tasks):
-    if not tasks:
-        return {"best": "", "likely": "", "worst": "", "avg_slip": 0}
-
+    if not tasks: return {"best": "", "likely": "", "worst": "", "avg_slip": 0}
     best_dates = [parse_date(t["baseline_end"]) for t in tasks if parse_date(t["baseline_end"])]
     likely_dates = [parse_date(t["cascade_end"]) for t in tasks if parse_date(t["cascade_end"])]
     slips = [t["slip_days"] for t in tasks if t["slip_days"] > 0]
     avg_slip = sum(slips) / len(slips) if slips else 0
-
     worst_candidates = []
     for t in tasks:
         be = parse_date(t["baseline_end"])
-        if be:
-            worst_candidates.append(be + timedelta(days=int(avg_slip)))
-
+        if be: worst_candidates.append(be + timedelta(days=int(avg_slip)))
     return {
         "best": max(best_dates).isoformat() if best_dates else "",
         "likely": max(likely_dates).isoformat() if likely_dates else "",
@@ -307,9 +308,7 @@ def compute_completion(tasks):
 
 
 def generate_summaries(tasks, defects, history):
-    if not DEEPSEEK_API_KEY:
-        print("  DEEPSEEK_API_KEY not set. Skipping summaries.")
-        return {}
+    if not DEEPSEEK_API_KEY: return {}
 
     def batch(items, kind):
         payload = []
@@ -332,23 +331,13 @@ def generate_summaries(tasks, defects, history):
                 headers={"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"},
                 json={
                     "model": "deepseek-chat",
-                    "messages": [
-                        {"role": "system", "content": "Output only valid JSON."},
-                        {"role": "user", "content": prompt},
-                    ],
-                    "temperature": 0,
-                    "response_format": {"type": "json_object"},
-                },
-                timeout=120,
+                    "messages": [{"role": "system", "content": "Output only valid JSON."}, {"role": "user", "content": prompt}],
+                    "temperature": 0, "response_format": {"type": "json_object"},
+                }, timeout=120,
             )
-            if r.status_code != 200:
-                print(f"  AI error {r.status_code}: {r.text[:200]}")
-                return {}
-            content = r.json()["choices"][0]["message"]["content"]
-            return json.loads(content)
-        except Exception as e:
-            print(f"  AI summary failed: {e}")
-            return {}
+            if r.status_code != 200: return {}
+            return json.loads(r.json()["choices"][0]["message"]["content"])
+        except Exception: return {}
 
     out = {}
     out.update(batch(tasks, "task"))
@@ -366,8 +355,7 @@ def compute_kpis(tasks, defects):
     overdue = 0
     for t in tasks:
         fe = parse_date(t.get("forecast_end"))
-        if fe and fe < today and t["status"] != "Complete":
-            overdue += 1
+        if fe and fe < today and t["status"] != "Complete": overdue += 1
     positive_slips = [t["slip_days"] for t in tasks if t["slip_days"] > 0]
     avg_slip = round(sum(positive_slips) / len(positive_slips), 1) if positive_slips else 0
 
@@ -375,21 +363,13 @@ def compute_kpis(tasks, defects):
     critical_defects = sum(1 for d in open_defects if d["severity"] == "Critical")
 
     health = "green"
-    if critical_defects > 0 or overdue > 5:
-        health = "red"
-    elif overdue > 0 or avg_slip > 7:
-        health = "amber"
+    if critical_defects > 0 or overdue > 5: health = "red"
+    elif overdue > 0 or avg_slip > 7: health = "amber"
 
     return {
-        "total_tasks": total,
-        "complete": complete,
-        "in_progress": in_progress,
-        "blocked": blocked,
-        "overdue": overdue,
-        "avg_slip": avg_slip,
-        "open_defects": len(open_defects),
-        "critical_defects": critical_defects,
-        "health": health,
+        "total_tasks": total, "complete": complete, "in_progress": in_progress, "blocked": blocked,
+        "overdue": overdue, "avg_slip": avg_slip, "open_defects": len(open_defects),
+        "critical_defects": critical_defects, "health": health,
     }
 
 
@@ -397,35 +377,21 @@ def render(audience, role, config, kpis, completion, tasks, defects, dependencie
     os.makedirs(DASHBOARDS_DIR, exist_ok=True)
     env = Environment(loader=FileSystemLoader(TEMPLATES_DIR), autoescape=False)
     template = env.get_template("dashboard.html")
-
     data = {
         "config": {k: str(v) for k, v in config.items()},
-        "kpis": kpis,
-        "completion": completion,
-        "tasks": tasks,
-        "defects": defects,
-        "dependencies": dependencies,
-        "updates": updates[:50],
-        "history": history,
-        "summaries": summaries,
+        "kpis": kpis, "completion": completion, "tasks": tasks, "defects": defects,
+        "dependencies": dependencies, "updates": updates[:50], "history": history, "summaries": summaries,
     }
-
     data_json = json.dumps(data, default=str).replace("<", "\\u003c").replace(">", "\\u003e")
-
     html = template.render(
-        project_name=config.get("name", "Project"),
-        client=config.get("client", ""),
-        contract_id=config.get("contract_id", ""),
-        generated_at=datetime.now().strftime("%Y-%m-%d %H:%M"),
-        audience=role,
-        data_json=data_json,
+        project_name=config.get("name", "Project"), client=config.get("client", ""),
+        contract_id=config.get("contract_id", ""), generated_at=datetime.now().strftime("%Y-%m-%d %H:%M"),
+        audience=role, data_json=data_json,
     )
-
     out_dir = os.path.join(DASHBOARDS_DIR, audience)
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, "index.html")
-    with open(out_path, "w", encoding="utf-8") as f:
-        f.write(html)
+    with open(out_path, "w", encoding="utf-8") as f: f.write(html)
     print(f"  Wrote {out_path} ({len(html)} bytes)")
     return out_path
 
@@ -433,7 +399,6 @@ def render(audience, role, config, kpis, completion, tasks, defects, dependencie
 def upload_to_drive(local_path, folder_id, filename):
     creds = get_credentials()
     service = build("drive", "v3", credentials=creds)
-
     last_error = None
     for attempt in range(3):
         try:
@@ -441,34 +406,27 @@ def upload_to_drive(local_path, folder_id, filename):
             existing = service.files().list(q=query, fields="files(id)").execute().get("files", [])
             media = MediaFileUpload(local_path, mimetype="text/html", resumable=False)
             if existing:
-                file_id = existing[0]["id"]
-                service.files().update(fileId=file_id, media_body=media).execute()
-                print(f"  Drive updated: {filename} (id={file_id})")
+                service.files().update(fileId=existing[0]["id"], media_body=media).execute()
+                print(f"  Drive updated: {filename}")
             else:
                 meta = {"name": filename, "parents": [folder_id]}
                 created = service.files().create(body=meta, media_body=media, fields="id").execute()
-                print(f"  Drive created: {filename} (id={created['id']})")
+                print(f"  Drive created: {filename}")
             return True
         except Exception as e:
             last_error = e
-            print(f"  Upload attempt {attempt + 1} failed: {type(e).__name__}")
-            if attempt < 2:
-                time.sleep(5)
-    print(f"  Drive upload FAILED after 3 attempts: {last_error}")
+            if attempt < 2: time.sleep(5)
+    print(f"  Drive upload FAILED: {last_error}")
     return False
 
 
 def main():
     print("=== generate.py ===")
     ss = connect()
-    print("Connected:", ss.title)
-
     config = read_config(ss)
 
     raw = {}
-    for tab in TABS:
-        raw[tab] = read_tab(ss, tab)
-        print(f"  {tab}: {len(raw[tab])} rows")
+    for tab in TABS: raw[tab] = read_tab(ss, tab)
 
     company_map, name_map = build_maps(raw["People"])
     tasks = build_tasks(raw["Tasks"], company_map, name_map)
@@ -476,37 +434,26 @@ def main():
     dependencies = build_dependencies(raw["Dependencies"])
     updates = build_updates(raw["Updates"])
 
-    print("Applying dependency cascade...")
     tasks = apply_cascade(tasks, dependencies)
-
     history = build_history(updates)
-    print(f"  History: {sum(len(v) for v in history.values())} entries across {len(history)} items")
-
-    print("Generating AI summaries...")
     summaries = generate_summaries(tasks, defects, history)
-
     folder_id = config.get("drive_dashboard_folder_id")
 
     def do_render(audience, role, t_list, d_list):
         kpis = compute_kpis(t_list, d_list)
         completion = compute_completion(t_list)
-        print(f"Rendering {audience}...")
         p = render(audience, role, config, kpis, completion, t_list, d_list, dependencies, updates, history, summaries)
-        if folder_id:
-            upload_to_drive(p, folder_id, f"{audience}_dashboard.html")
+        if folder_id: upload_to_drive(p, folder_id, f"{audience}_dashboard.html")
 
-    # Generate Executive (All Data)
     do_render("executive", "executive", tasks, defects)
 
-    # Generate Company Specific
     for co in ["TomatoFarms", "MTG", "Subcon"]:
         co_tasks = [t for t in tasks if t["owner_company"] == co]
-        co_defects = [d for d in defects if d["assigned_company"] == co]
+        co_defects = [d for d in defects if co in d["assigned_company"]]
         if co_tasks or co_defects:
             do_render(co.lower().replace(" ", "_"), co.lower().replace(" ", "_"), co_tasks, co_defects)
 
     print("Done.")
-
 
 if __name__ == "__main__":
     main()
