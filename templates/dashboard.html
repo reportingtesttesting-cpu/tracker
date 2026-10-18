@@ -188,7 +188,9 @@ table.data .pill{padding:2px 8px;border-radius:999px;font-size:10px;font-weight:
       <button class="tab active" data-tab="overview">Overview</button>
       <button class="tab" data-tab="tasks">Tasks</button>
       <button class="tab" data-tab="defects">Defects</button>
-      <button class="tab" data-tab="gantt">Gantt</button>
+      <button class="tab" data-tab="gantt-tasks">Tasks Gantt</button>
+      <button class="tab" data-tab="gantt-defects">Defects Gantt</button>
+      <button class="tab" data-tab="trends">Trends</button>
       <button class="tab" data-tab="activity">Activity</button>
     </div>
   </div>
@@ -215,7 +217,6 @@ table.data .pill{padding:2px 8px;border-radius:999px;font-size:10px;font-weight:
   </div>
 
   <div id="tab-defects" class="tab-content" style="display:none;">
-    <!-- CHANGED FROM GRID-3 TO GRID-2 -->
     <div class="grid-2">
       <div class="panel"><div class="panel-title">Open by severity</div><div class="chart-wrap"><canvas id="chDefSev"></canvas></div></div>
       <div class="panel"><div class="panel-title">Aging buckets</div><div class="chart-wrap"><canvas id="chAge"></canvas></div></div>
@@ -223,10 +224,24 @@ table.data .pill{padding:2px 8px;border-radius:999px;font-size:10px;font-weight:
     <div class="panel"><div class="panel-title">All defects <span id="defectCount"></span></div><div id="tblDefects"></div></div>
   </div>
 
-  <div id="tab-gantt" class="tab-content" style="display:none;">
+  <div id="tab-gantt-tasks" class="tab-content" style="display:none;">
     <div class="panel">
-      <div class="panel-title">Gantt — reported forecast (solid), cascade (dashed)</div>
+      <div class="panel-title">Tasks Gantt</div>
       <div id="ganttChart" style="width:100%;"></div>
+    </div>
+  </div>
+
+  <div id="tab-gantt-defects" class="tab-content" style="display:none;">
+    <div class="panel">
+      <div class="panel-title">Defect Lifecycle Gantt</div>
+      <div id="defectGanttChart" style="width:100%;"></div>
+    </div>
+  </div>
+
+  <div id="tab-trends" class="tab-content" style="display:none;">
+    <div class="grid-2">
+      <div class="panel"><div class="panel-title">Task Burn-down</div><div class="chart-wrap" style="height:350px;"><canvas id="chTrendTasks"></canvas></div></div>
+      <div class="panel"><div class="panel-title">Defect Burn-down</div><div class="chart-wrap" style="height:350px;"><canvas id="chTrendDefects"></canvas></div></div>
     </div>
   </div>
 
@@ -351,6 +366,8 @@ function filterByCompany() {
     renderTasks();
     renderDefects();
     renderGantt();
+    renderDefectGantt();
+    renderTrends();
     renderAllUpdates();
 }
 
@@ -543,129 +560,218 @@ function renderGantt(){
     return aDate.localeCompare(bDate);
   });
   
-  const yOrder = sortedTasks.map(t => t.id);
   const today = new Date().toISOString().slice(0,10);
   const traces = [];
   const taskIndexMap = {};
   sortedTasks.forEach((t, i) => taskIndexMap[t.id] = i);
 
-  const addTrack = (name, color, width, yOffset, filterFn, getStart, getEnd, getHover) => {
-    const trackTasks = sortedTasks.filter(filterFn);
-    if(trackTasks.length === 0) return;
-    
-    const yVals = trackTasks.map(t => taskIndexMap[t.id] + yOffset);
-    const xVals = trackTasks.map(t => {
-        const s = new Date(getStart(t));
-        const e = new Date(getEnd(t));
-        const diff = e - s;
-        return isNaN(diff) || diff < 0 ? 0 : diff;
-    });
-    const baseVals = trackTasks.map(getStart);
-    
-    traces.push({
-      type: 'bar', orientation: 'h',
-      y: yVals,
-      x: xVals,
-      base: baseVals,
-      marker: { color: color },
-      name: name,
-      hovertext: trackTasks.map(getHover),
-      hoverinfo: 'text',
-      width: width
-    });
-  };
+  function addLineTrack(tasksList, startField, endField, color, name, width) {
+      const x = [], y = [], hover = [];
+      tasksList.forEach(t => {
+          let s = t[startField];
+          let e = t[endField];
+          if (!s || !e) return;
+          if (new Date(e) < new Date(s)) { let tmp = s; s = e; e = tmp; }
+          x.push(s, e, null);
+          y.push(taskIndexMap[t.id], taskIndexMap[t.id], null);
+          hover.push(`<b>${t.name}</b><br>${name}: ${s} → ${e}`);
+      });
+      if (x.length > 0) {
+          traces.push({
+              type: 'scatter', mode: 'lines',
+              x: x, y: y,
+              line: { color: color, width: width },
+              name: name,
+              text: hover, hoverinfo: 'text'
+          });
+      }
+  }
 
-  // 1. Baseline
-  addTrack('Baseline', '#4a525c', 0.18, -0.24,
-    t => t.baseline_start && t.baseline_end,
-    t => t.baseline_start,
-    t => t.baseline_end,
-    t => `<b>${t.name}</b><br>Baseline: ${t.baseline_start} → ${t.baseline_end}`
-  );
-
-  // 2. Forecast (with conditional colors)
+  addLineTrack(sortedTasks.filter(t => t.baseline_start && t.baseline_end), 'baseline_start', 'baseline_end', '#4a525c', 'Baseline', 8);
+  
   const foreTasks = sortedTasks.filter(t => t.forecast_start && t.forecast_end);
-  if (foreTasks.length > 0) {
-    const fY = foreTasks.map(t => taskIndexMap[t.id]);
-    const fX = foreTasks.map(t => {
-        const s = new Date(t.forecast_start);
-        const e = new Date(t.forecast_end);
-        const diff = e - s;
-        return isNaN(diff) || diff < 0 ? 0 : diff;
-    });
-    traces.push({
-      type: 'bar', orientation: 'h',
-      y: fY,
-      x: fX,
-      base: foreTasks.map(t => t.forecast_start),
-      marker: { color: foreTasks.map(t => t.critical ? '#e76f51' : '#58a6ff') },
-      name: 'Forecast',
-      hovertext: foreTasks.map(t => `<b>${t.name}</b><br>Forecast: ${t.forecast_start} → ${t.forecast_end}<br>Status: ${t.status} (${t.percent}%)`),
-      hoverinfo: 'text',
-      width: 0.3
-    });
-  }
+  const critFore = foreTasks.filter(t => t.critical);
+  const normalFore = foreTasks.filter(t => !t.critical);
+  addLineTrack(normalFore, 'forecast_start', 'forecast_end', '#58a6ff', 'Forecast', 14);
+  addLineTrack(critFore, 'forecast_start', 'forecast_end', '#e76f51', 'Forecast (critical)', 14);
+  
+  addLineTrack(sortedTasks.filter(t => t.cascade_start && t.cascade_end), 'cascade_start', 'cascade_end', '#f0883e', 'Cascade (dependency)', 6);
+  addLineTrack(sortedTasks.filter(t => t.actual_start && t.actual_finish), 'actual_start', 'actual_finish', '#3fb950', 'Actual', 18);
 
-  // 3. Cascade
-  addTrack('Cascade (dependency)', '#f0883e', 0.18, 0.24,
-    t => t.cascade_start && t.cascade_end && (t.cascade_start !== t.forecast_start || t.cascade_end !== t.forecast_end),
-    t => t.cascade_start,
-    t => t.cascade_end,
-    t => `<b>${t.name}</b><br>Cascade: ${t.cascade_start} → ${t.cascade_end}`
-  );
-
-  // 4. Actual
-  const actTasks = sortedTasks.filter(t => t.actual_start && t.actual_finish);
-  if (actTasks.length > 0) {
-    const aY = actTasks.map(t => taskIndexMap[t.id] + 0.24);
-    const aX = actTasks.map(t => {
-        const s = new Date(t.actual_start);
-        const e = new Date(t.actual_finish);
-        const diff = e - s;
-        return isNaN(diff) || diff < 0 ? 0 : diff;
-    });
-    traces.push({
-      type: 'bar', orientation: 'h',
-      y: aY,
-      x: aX,
-      base: actTasks.map(t => t.actual_start),
-      marker: { color: '#3fb950' },
-      name: 'Actual',
-      hovertext: actTasks.map(t => `<b>${t.name}</b><br>Actual: ${t.actual_start} → ${t.actual_finish}`),
-      hoverinfo: 'text',
-      width: 0.18
-    });
-  }
-
-  // Dummy traces for legend
-  traces.push({ type: 'bar', orientation: 'h', y: [null], x: [null], marker: {color: '#4a525c'}, name: 'Baseline', showlegend: true });
-  traces.push({ type: 'bar', orientation: 'h', y: [null], x: [null], marker: {color: '#58a6ff'}, name: 'Forecast', showlegend: true });
-  traces.push({ type: 'bar', orientation: 'h', y: [null], x: [null], marker: {color: '#e76f51'}, name: 'Forecast (critical)', showlegend: true });
-  traces.push({ type: 'bar', orientation: 'h', y: [null], x: [null], marker: {color: '#f0883e'}, name: 'Cascade', showlegend: true });
-  traces.push({ type: 'bar', orientation: 'h', y: [null], x: [null], marker: {color: '#3fb950'}, name: 'Actual', showlegend: true });
+  traces.push({ type: 'scatter', mode: 'lines', x: [null], y: [null], line: {color: '#4a525c', width: 8}, name: 'Baseline' });
+  traces.push({ type: 'scatter', mode: 'lines', x: [null], y: [null], line: {color: '#58a6ff', width: 14}, name: 'Forecast' });
+  traces.push({ type: 'scatter', mode: 'lines', x: [null], y: [null], line: {color: '#e76f51', width: 14}, name: 'Forecast (critical)' });
+  traces.push({ type: 'scatter', mode: 'lines', x: [null], y: [null], line: {color: '#f0883e', width: 6}, name: 'Cascade' });
+  traces.push({ type: 'scatter', mode: 'lines', x: [null], y: [null], line: {color: '#3fb950', width: 18}, name: 'Actual' });
 
   const layout = {
     paper_bgcolor: '#0e1117', plot_bgcolor: '#0e1117',
     font: { color: '#e6edf3', size: 11 },
-    barmode: 'overlay',
-    bargap: 0,
     showlegend: true,
     legend: { orientation: 'h', yanchor: 'bottom', y: 1.02, xanchor: 'left', x: 0, bgcolor: 'rgba(0,0,0,0)', font: {size: 10} },
-    margin: { l: 80, r: 20, t: 60, b: 40 },
+    margin: { l: 120, r: 20, t: 60, b: 40 },
     xaxis: { type: 'date', gridcolor: '#232a34', zerolinecolor: '#232a34', tickformat: '%b %Y' },
     yaxis: {
       tickvals: sortedTasks.map((t, i) => i),
-      ticktext: sortedTasks.map(t => t.id),
+      ticktext: sortedTasks.map(t => t.id + ' (' + (t.owner_company || 'N/A') + ')'),
       autorange: 'reversed',
       gridcolor: '#1a2029',
       tickfont: { size: 10 }
     },
-    shapes: [
-      { type: 'line', x0: today, x1: today, y0: 0, y1: 1, yref: 'paper', line: { color: '#e76f51', width: 2, dash: 'dash' } }
-    ],
+    shapes: [{ type: 'line', x0: today, x1: today, y0: 0, y1: 1, yref: 'paper', line: { color: '#e76f51', width: 2, dash: 'dash' } }],
     height: Math.max(600, sortedTasks.length * 40 + 150)
   };
   Plotly.newPlot('ganttChart', traces, layout, {displayModeBar: false, responsive: true});
+}
+
+function renderDefectGantt() {
+    if(typeof Plotly==='undefined')return;
+    const defects=DATA.defects||[];
+    if(!defects.length){document.getElementById('defectGanttChart').innerHTML='<div class="empty">No defects.</div>';return;}
+    
+    const sorted = [...defects].sort((a,b) => (a.detected_at||'').localeCompare(b.detected_at||''));
+    const traces = [];
+    const idxMap = {};
+    sorted.forEach((d, i) => idxMap[d.id] = i);
+    const today = new Date().toISOString().slice(0,10);
+
+    function addTrack(tasksList, startField, endField, color, name, width) {
+        const x = [], y = [], hover = [];
+        tasksList.forEach(d => {
+            let s = d[startField];
+            let e = d[endField] || today; 
+            if (!s) return;
+            if (new Date(e) < new Date(s)) return;
+            x.push(s, e, null);
+            y.push(idxMap[d.id], idxMap[d.id], null);
+            hover.push(`<b>${d.title}</b><br>${name}: ${s} → ${e}`);
+        });
+        if(x.length > 0) {
+            traces.push({
+                type: 'scatter', mode: 'lines',
+                x: x, y: y,
+                line: { color: color, width: width },
+                name: name,
+                text: hover, hoverinfo: 'text'
+            });
+        }
+    }
+
+    addTrack(sorted.filter(d => d.status === 'New' || d.status === 'Assigned'), 'detected_at', 'closed_at', '#e76f51', 'Open (Assigned)', 14);
+    addTrack(sorted.filter(d => d.status === 'In Progress' || d.status === 'Fixed' || d.status === 'Pending Verification'), 'detected_at', 'closed_at', '#f0883e', 'Open (In Progress)', 14);
+    addTrack(sorted.filter(d => d.is_open), 'detected_at', 'closed_at', '#58a6ff', 'Open (Other)', 14);
+    addTrack(sorted.filter(d => !d.is_open), 'detected_at', 'closed_at', '#3fb950', 'Closed', 14);
+
+    traces.push({ type: 'scatter', mode: 'lines', x: [null], y: [null], line: {color: '#e76f51', width: 14}, name: 'Assigned/New' });
+    traces.push({ type: 'scatter', mode: 'lines', x: [null], y: [null], line: {color: '#f0883e', width: 14}, name: 'In Progress' });
+    traces.push({ type: 'scatter', mode: 'lines', x: [null], y: [null], line: {color: '#58a6ff', width: 14}, name: 'Open (Other)' });
+    traces.push({ type: 'scatter', mode: 'lines', x: [null], y: [null], line: {color: '#3fb950', width: 14}, name: 'Closed' });
+
+    const layout = {
+        paper_bgcolor: '#0e1117', plot_bgcolor: '#0e1117',
+        font: { color: '#e6edf3', size: 11 },
+        showlegend: true,
+        legend: { orientation: 'h', yanchor: 'bottom', y: 1.02, xanchor: 'left', x: 0, bgcolor: 'rgba(0,0,0,0)', font: {size: 10} },
+        margin: { l: 100, r: 20, t: 60, b: 40 },
+        xaxis: { type: 'date', gridcolor: '#232a34', zerolinecolor: '#232a34', tickformat: '%b %Y' },
+        yaxis: {
+            tickvals: sorted.map((d, i) => i),
+            ticktext: sorted.map(d => d.id + ' (' + (d.assigned_company || 'N/A') + ')'),
+            autorange: 'reversed',
+            gridcolor: '#1a2029',
+            tickfont: { size: 10 }
+        },
+        shapes: [{ type: 'line', x0: today, x1: today, y0: 0, y1: 1, yref: 'paper', line: { color: '#e76f51', width: 2, dash: 'dash' } }],
+        height: Math.max(400, sorted.length * 30 + 150)
+    };
+    Plotly.newPlot('defectGanttChart', traces, layout, {displayModeBar: false, responsive: true});
+}
+
+function renderTrends() {
+    if(typeof Chart === 'undefined') return;
+    const tasks = DATA.tasks || [];
+    const defects = DATA.defects || [];
+    if(!tasks.length && !defects.length) return;
+
+    let minDate = new Date('2026-01-01');
+    let maxDate = new Date();
+    tasks.forEach(t => {
+        if(t.baseline_start) { let d = new Date(t.baseline_start); if(d < minDate) minDate = d; }
+        if(t.cascade_end) { let d = new Date(t.cascade_end); if(d > maxDate) maxDate = d; }
+        if(t.forecast_end) { let d = new Date(t.forecast_end); if(d > maxDate) maxDate = d; }
+    });
+    let endOfYear = new Date(maxDate.getFullYear(), 11, 31);
+    if(endOfYear > maxDate) maxDate = endOfYear;
+
+    const months = [];
+    let curr = new Date(minDate.getFullYear(), minDate.getMonth(), 1);
+    while(curr <= maxDate) {
+        months.push(new Date(curr).toISOString().slice(0,7));
+        curr.setMonth(curr.getMonth() + 1);
+    }
+
+    function getBurnTasks(field) {
+        let zeroReached = false;
+        return months.map(m => {
+            if (zeroReached) return null;
+            let count = tasks.filter(t => t[field] && t[field] > m).length;
+            if (count === 0) zeroReached = true;
+            return count;
+        });
+    }
+
+    applyChartDefaults();
+    destroyChart('trendTasks');
+    charts.trendTasks = new Chart(document.getElementById('chTrendTasks'), {
+        type: 'line',
+        data: {
+            labels: months,
+            datasets: [
+                { label: 'Optimistic (Baseline)', data: getBurnTasks('baseline_end'), borderColor: '#3fb950', backgroundColor: 'transparent', tension: 0.1, spanGaps: false },
+                { label: 'Realistic (Forecast)', data: getBurnTasks('forecast_end'), borderColor: '#58a6ff', backgroundColor: 'transparent', tension: 0.1, spanGaps: false },
+                { label: 'Pessimistic (Cascade)', data: getBurnTasks('cascade_end'), borderColor: '#e76f51', backgroundColor: 'transparent', tension: 0.1, spanGaps: false }
+            ]
+        },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
+    });
+
+    function getBurnDefects() {
+        let zeroReached = { opt: false, real: false, pess: false };
+        const opt = [], real = [], pess = [];
+        months.forEach(m => {
+            let o=0, r=0, p=0;
+            defects.forEach(d => {
+                if(d.closed_at && d.closed_at <= m) return;
+                if(d.status === 'Verified' || d.status === 'Closed') return;
+                o++;
+                if(d.closed_at && d.closed_at > m) return;
+                r++;
+                p++;
+            });
+            if (!zeroReached.opt && o === 0) zeroReached.opt = true;
+            if (!zeroReached.real && r === 0) zeroReached.real = true;
+            if (!zeroReached.pess && p === 0) zeroReached.pess = true;
+            opt.push(zeroReached.opt ? null : o);
+            real.push(zeroReached.real ? null : r);
+            pess.push(zeroReached.pess ? null : p);
+        });
+        return { opt, real, pess };
+    }
+    const dData = getBurnDefects();
+    
+    destroyChart('trendDefects');
+    charts.trendDefects = new Chart(document.getElementById('chTrendDefects'), {
+        type: 'line',
+        data: {
+            labels: months,
+            datasets: [
+                { label: 'Optimistic', data: dData.opt, borderColor: '#3fb950', backgroundColor: 'transparent', tension: 0.1, spanGaps: false },
+                { label: 'Realistic', data: dData.real, borderColor: '#58a6ff', backgroundColor: 'transparent', tension: 0.1, spanGaps: false },
+                { label: 'Pessimistic', data: dData.pess, borderColor: '#e76f51', backgroundColor: 'transparent', tension: 0.1, spanGaps: false }
+            ]
+        },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
+    });
 }
 
 function renderAllUpdates(){
@@ -757,6 +863,7 @@ function openDefect(id){
       <div class="field"><div class="k">Priority</div><div class="v">${esc(d.priority)}</div></div>
       <div class="field"><div class="k">Assigned</div><div class="v">${esc(d.assigned_name || d.assigned_to)}</div></div>
       <div class="field"><div class="k">Detected</div><div class="v">${esc(d.detected_at)}</div></div>
+      <div class="field"><div class="k">Closed</div><div class="v">${esc(d.closed_at) || '—'}</div></div>
       <div class="field"><div class="k">Age</div><div class="v">${d.age_days!=null?d.age_days+' days':'—'}</div></div>
       <div class="field"><div class="k">Environment</div><div class="v">${esc(d.environment)}</div></div>
       <div class="field"><div class="k">Linked task</div><div class="v">${esc(d.linked_task_id)}</div></div>
@@ -806,7 +913,9 @@ document.getElementById('tabs').addEventListener('click',function(e){
   b.classList.add('active');
   document.querySelectorAll('.tab-content').forEach(x=>x.style.display='none');
   document.getElementById('tab-'+t).style.display='block';
-  if(t==='gantt')renderGantt();
+  if(t==='gantt-tasks')renderGantt();
+  if(t==='gantt-defects')renderDefectGantt();
+  if(t==='trends')renderTrends();
 });
 
 renderHeader();
@@ -816,6 +925,8 @@ renderOverview();
 renderTasks();
 renderDefects();
 renderGantt();
+renderDefectGantt();
+renderTrends();
 renderAllUpdates();
 </script>
 </body>

@@ -134,14 +134,13 @@ def build_tasks(tasks_df, company_map, name_map):
         pct = int(float(r.get("percent_complete", 0) or 0))
         pct = min(100, max(0, pct))
 
-        # Slip Logic
         slip = 0
         if status == "Complete":
             finish_date = af or today
             if be:
                 slip = (finish_date - be).days
             elif fe:
-                slip = (finish_date - fe).days # Negative if finished early
+                slip = (finish_date - fe).days
         else:
             if be and fe:
                 slip = (fe - be).days
@@ -192,9 +191,9 @@ def build_defects(defects_df, company_map, name_map):
         assigned_name = ", ".join(names) if names else assigned_raw
         assigned_company = ", ".join(companies) if companies else ""
 
-        det = parse_date(r.get("detected_at"))
+        det = parse_date(r.get("detected_at")) or today
         clo = parse_date(r.get("closed_at"))
-        age = (today - det).days if det else None
+        age = (today - det).days
         mttr = (clo - det).days if (det and clo) else None
         status = str(r.get("status", "New"))
         
@@ -208,8 +207,8 @@ def build_defects(defects_df, company_map, name_map):
             "assigned_to": assigned_raw,
             "assigned_name": assigned_name,
             "assigned_company": assigned_company,
-            "detected_at": str(r.get("detected_at", ""))[:10],
-            "closed_at": str(r.get("closed_at", ""))[:10],
+            "detected_at": det.isoformat(),
+            "closed_at": clo.isoformat() if clo else "",
             "root_cause": str(r.get("root_cause", "")),
             "corrective_action": str(r.get("corrective_action", "")),
             "linked_task_id": str(r.get("linked_task_id", "")),
