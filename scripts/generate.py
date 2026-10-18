@@ -127,15 +127,18 @@ def build_tasks(tasks_df, company_map, name_map):
         af = parse_date(r.get("actual_finish"))
         
         pct = int(float(r.get("percent_complete", 0) or 0))
-        pct = min(100, max(0, pct)) # Clamp 0-100
+        pct = min(100, max(0, pct))
 
-        # Slip Logic: If complete, use actual_finish or today. Else use forecast.
+        # Slip Logic
         slip = 0
-        if be:
-            if status == "Complete":
-                finish_date = af or today
+        if status == "Complete":
+            finish_date = af or today
+            if be:
                 slip = (finish_date - be).days
             elif fe:
+                slip = (finish_date - fe).days # Negative if finished early
+        else:
+            if be and fe:
                 slip = (fe - be).days
 
         out.append({
@@ -343,7 +346,7 @@ def generate_summaries(tasks, defects, history):
         prompt = (
             f"You are a project controls analyst. For each {kind} below, write a one-sentence summary of the current situation based on its history. "
             "Focus on the ACTUAL CAUSES, BLOCKERS, and NOTES. Do not mention technical field names (like 'percent_complete' or 'forecast_end'). "
-            "Summarize the narrative. If the item is complete, state if it was finished late or on time. "
+            "Summarize the narrative. If the item is complete, state if it was finished late or early. "
             "Output strict JSON: {\"ID\": \"summary\", ...}. "
             f"DATA: {json.dumps(payload)}"
         )
