@@ -9,7 +9,7 @@
 :root{
   --bg:#0a0d12;--bg-elev:#11151c;--panel:#161b24;--panel-2:#1c2230;--border:#232a36;--border-strong:#2f3846;
   --text:#e6edf3;--muted:#8b949e;--accent:#58a6ff;--green:#3fb950;
-  --red:#e76f51; /* Terracotta: urgent but not screaming */
+  --red:#e76f51; /* Terracotta */
   --orange:#f0883e;--yellow:#d29922;--purple:#a371f7;--cyan:#39c5cf;
   --radius:10px;--radius-sm:6px;
 }
@@ -215,10 +215,10 @@ table.data .pill{padding:2px 8px;border-radius:999px;font-size:10px;font-weight:
   </div>
 
   <div id="tab-defects" class="tab-content" style="display:none;">
-    <div class="grid-3">
+    <!-- CHANGED FROM GRID-3 TO GRID-2 -->
+    <div class="grid-2">
       <div class="panel"><div class="panel-title">Open by severity</div><div class="chart-wrap"><canvas id="chDefSev"></canvas></div></div>
       <div class="panel"><div class="panel-title">Aging buckets</div><div class="chart-wrap"><canvas id="chAge"></canvas></div></div>
-      <div class="panel"><div class="panel-title">Root cause Pareto</div><div class="chart-wrap"><canvas id="chPareto"></canvas></div></div>
     </div>
     <div class="panel"><div class="panel-title">All defects <span id="defectCount"></span></div><div id="tblDefects"></div></div>
   </div>
@@ -226,7 +226,6 @@ table.data .pill{padding:2px 8px;border-radius:999px;font-size:10px;font-weight:
   <div id="tab-gantt" class="tab-content" style="display:none;">
     <div class="panel">
       <div class="panel-title">Gantt — reported forecast (solid), cascade (dashed)</div>
-      <!-- REMOVED hardcoded 700px height so Plotly can auto-expand -->
       <div id="ganttChart" style="width:100%;"></div>
     </div>
   </div>
@@ -338,7 +337,7 @@ function filterByCompany() {
         DATA.completion = ORIGINAL_COMPLETION;
     } else {
         DATA.tasks = ORIGINAL_TASKS.filter(t => t.owner_company === co);
-        DATA.defects = ORIGINAL_DEFECTS.filter(d => d.assigned_company === co);
+        DATA.defects = ORIGINAL_DEFECTS.filter(d => d.assigned_company.includes(co));
         DATA.kpis = computeClientKPIs(DATA.tasks, DATA.defects);
         DATA.completion = computeClientCompletion(DATA.tasks);
     }
@@ -513,30 +512,6 @@ function renderDefects(){
       backgroundColor:['#3fb950','#d29922','#f0883e','#e76f51','#e76f51']}]},
     options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
       scales:{y:{beginAtZero:true,ticks:{precision:0}}}}
-  });
-
-  const pareto={};
-  d.forEach(x=>{
-    const rc=(x.root_cause||'').trim();
-    if(!rc||rc==='-')return;
-    pareto[rc]=(pareto[rc]||0)+1;
-  });
-  const items=Object.entries(pareto).sort((a,b)=>b[1]-a[1]).slice(0,8);
-  const labels=items.map(x=>x[0].length>30?x[0].slice(0,27)+'...':x[0]);
-  const counts=items.map(x=>x[1]);
-  const total=counts.reduce((a,b)=>a+b,0)||1;
-  const cum=[];let run=0;
-  counts.forEach(c=>{run+=c;cum.push(Math.round(run/total*100));});
-  destroyChart('pareto');
-  charts.pareto=new Chart(document.getElementById('chPareto'),{
-    data:{labels:labels,datasets:[
-      {type:'bar',label:'Count',data:counts,backgroundColor:'#58a6ff',yAxisID:'y'},
-      {type:'line',label:'Cum %',data:cum,borderColor:'#e76f51',yAxisID:'y1',tension:0.2}
-    ]},
-    options:{responsive:true,maintainAspectRatio:false,
-      scales:{y:{beginAtZero:true,position:'left',ticks:{precision:0}},
-        y1:{beginAtZero:true,position:'right',max:100,grid:{display:false}}},
-      plugins:{legend:{position:'bottom'}}}
   });
 
   let h='<table class="data"><thead><tr><th>ID</th><th>Title</th><th>Severity</th><th>Status</th><th>Assigned</th><th>Age</th><th>AI summary</th></tr></thead><tbody>';

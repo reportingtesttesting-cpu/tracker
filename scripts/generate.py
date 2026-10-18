@@ -114,14 +114,30 @@ def build_maps(people_df):
 
 
 def build_tasks(tasks_df, company_map, name_map):
+    today = datetime.now(timezone.utc).date()
     out = []
     for _, r in tasks_df.iterrows():
         if not r.get("task_id"):
             continue
         owner_id = str(r.get("owner_id", ""))
+        status = str(r.get("status", "Not Started"))
+        
         be = parse_date(r.get("baseline_end"))
         fe = parse_date(r.get("forecast_end"))
-        slip = (fe - be).days if (be and fe) else 0
+        af = parse_date(r.get("actual_finish"))
+        
+        pct = int(float(r.get("percent_complete", 0) or 0))
+        pct = min(100, max(0, pct)) # Clamp 0-100
+
+        # Slip Logic: If complete, use actual_finish or today. Else use forecast.
+        slip = 0
+        if be:
+            if status == "Complete":
+                finish_date = af or today
+                slip = (finish_date - be).days
+            elif fe:
+                slip = (fe - be).days
+
         out.append({
             "id": str(r.get("task_id")),
             "parent_id": str(r.get("parent_task_id", "")).strip(),
@@ -130,8 +146,8 @@ def build_tasks(tasks_df, company_map, name_map):
             "owner_id": owner_id,
             "owner_name": name_map.get(owner_id, owner_id),
             "owner_company": company_map.get(owner_id, ""),
-            "status": str(r.get("status", "Not Started")),
-            "percent": int(float(r.get("percent_complete", 0) or 0)),
+            "status": status,
+            "percent": pct,
             "priority": str(r.get("priority", "P2")),
             "critical": str(r.get("critical_flag", "")).upper() == "TRUE",
             "type": str(r.get("type", "contractual")),
@@ -250,7 +266,10 @@ def apply_cascade(tasks, dependencies):
     task_map = {t["id"]: t for t in tasks}
     for t in tasks:
         cs = parse_date(t.get("forecast_start")) or parse_date(t.get("baseline_start"))
-        ce = parse_date(t.get("forecast_end")) or parse_date(t.get("baseline_end"))
+        if t["status"] == "Complete":
+            ce = parse_date(t.get("actual_finish")) or parse_date(t.get("forecast_end")) or parse_date(t.get("baseline_end"))
+        else:
+            ce = parse_date(t.get("forecast_end")) or parse_date(t.get("baseline_end"))
         t["_cs"] = cs
         t["_ce"] = ce
 
@@ -320,11 +339,15 @@ def generate_summaries(tasks, defects, history):
                 "status": it.get("status"),
                 "history": [f"{u['timestamp']} {u['field']}: {u['old_value']} -> {u['new_value']} {u['notes']}" for u in h],
             })
+            
         prompt = (
-            f"You are a project controls analyst. For each {kind} below, write a one-sentence factual status summary "
-            "based only on the provided data. Do not invent. Output strict JSON: {\"ID\": \"summary\", ...}. "
+            f"You are a project controls analyst. For each {kind} below, write a one-sentence summary of the current situation based on its history. "
+            "Focus on the ACTUAL CAUSES, BLOCKERS, and NOTES. Do not mention technical field names (like 'percent_complete' or 'forecast_end'). "
+            "Summarize the narrative. If the item is complete, state if it was finished late or on time. "
+            "Output strict JSON: {\"ID\": \"summary\", ...}. "
             f"DATA: {json.dumps(payload)}"
         )
+        
         try:
             r = requests.post(
                 "https://api.deepseek.com/chat/completions",
@@ -410,7 +433,7 @@ def upload_to_drive(local_path, folder_id, filename):
                 print(f"  Drive updated: {filename}")
             else:
                 meta = {"name": filename, "parents": [folder_id]}
-                created = service.files().create(body=meta, media_body=media, fields="id").execute()
+                service.files().create(body=meta, media_body=media, fields="id").execute()
                 print(f"  Drive created: {filename}")
             return True
         except Exception as e:
