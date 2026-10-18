@@ -543,83 +543,106 @@ function renderGantt(){
     return aDate.localeCompare(bDate);
   });
   
+  const yOrder = sortedTasks.map(t => t.id);
   const today = new Date().toISOString().slice(0,10);
   const traces = [];
+  const taskIndexMap = {};
+  sortedTasks.forEach((t, i) => taskIndexMap[t.id] = i);
 
-  const baseY = sortedTasks.map((t, i) => i - 0.24);
-  const foreY = sortedTasks.map((t, i) => i);
-  const cascY = sortedTasks.map((t, i) => i + 0.24);
-  const actY  = sortedTasks.map((t, i) => i + 0.24);
-
-  const baseBar = { 
-    type: 'bar', orientation: 'h', y: baseY, x: [], base: [], width: 0.18, 
-    marker: {color: '#4a525c'}, name: 'Baseline', hovertext: [], hoverinfo: 'text' 
+  const addTrack = (name, color, width, yOffset, filterFn, getStart, getEnd, getHover) => {
+    const trackTasks = sortedTasks.filter(filterFn);
+    if(trackTasks.length === 0) return;
+    
+    const yVals = trackTasks.map(t => taskIndexMap[t.id] + yOffset);
+    const xVals = trackTasks.map(t => {
+        const s = new Date(getStart(t));
+        const e = new Date(getEnd(t));
+        const diff = e - s;
+        return isNaN(diff) || diff < 0 ? 0 : diff;
+    });
+    const baseVals = trackTasks.map(getStart);
+    
+    traces.push({
+      type: 'bar', orientation: 'h',
+      y: yVals,
+      x: xVals,
+      base: baseVals,
+      marker: { color: color },
+      name: name,
+      hovertext: trackTasks.map(getHover),
+      hoverinfo: 'text',
+      width: width
+    });
   };
-  sortedTasks.forEach(t => {
-    if (t.baseline_start && t.baseline_end) {
-      const s = new Date(t.baseline_start);
-      const e = new Date(t.baseline_end);
-      baseBar.x.push((e - s) * 1); 
-      baseBar.base.push(t.baseline_start);
-      baseBar.hovertext.push(`<b>${t.name}</b><br>Baseline: ${t.baseline_start} → ${t.baseline_end}`);
-    } else {
-      baseBar.x.push(0); baseBar.base.push(t.baseline_start || today); baseBar.hovertext.push('');
-    }
-  });
-  traces.push(baseBar);
 
-  const foreBar = { 
-    type: 'bar', orientation: 'h', y: foreY, x: [], base: [], width: 0.3, 
-    marker: {color: []}, name: 'Forecast', hovertext: [], hoverinfo: 'text' 
-  };
-  sortedTasks.forEach(t => {
-    if (t.forecast_start && t.forecast_end) {
-      const s = new Date(t.forecast_start);
-      const e = new Date(t.forecast_end);
-      foreBar.x.push((e - s) * 1);
-      foreBar.base.push(t.forecast_start);
-      foreBar.hovertext.push(`<b>${t.name}</b><br>Forecast: ${t.forecast_start} → ${t.forecast_end}<br>Status: ${t.status} (${t.percent}%)`);
-      foreBar.marker.color.push(t.critical ? '#e76f51' : '#58a6ff');
-    } else {
-      foreBar.x.push(0); foreBar.base.push(t.forecast_start || today); foreBar.hovertext.push('');
-      foreBar.marker.color.push('#000000');
-    }
-  });
-  traces.push(foreBar);
+  // 1. Baseline
+  addTrack('Baseline', '#4a525c', 0.18, -0.24,
+    t => t.baseline_start && t.baseline_end,
+    t => t.baseline_start,
+    t => t.baseline_end,
+    t => `<b>${t.name}</b><br>Baseline: ${t.baseline_start} → ${t.baseline_end}`
+  );
 
-  const cascBar = { 
-    type: 'bar', orientation: 'h', y: cascY, x: [], base: [], width: 0.18, 
-    marker: {color: '#f0883e'}, name: 'Cascade (dependency)', hovertext: [], hoverinfo: 'text' 
-  };
-  sortedTasks.forEach(t => {
-    if (t.cascade_start && t.cascade_end && (t.cascade_start !== t.forecast_start || t.cascade_end !== t.forecast_end)) {
-      const s = new Date(t.cascade_start);
-      const e = new Date(t.cascade_end);
-      cascBar.x.push((e - s) * 1);
-      cascBar.base.push(t.cascade_start);
-      cascBar.hovertext.push(`<b>${t.name}</b><br>Cascade: ${t.cascade_start} → ${t.cascade_end}`);
-    } else {
-      cascBar.x.push(0); cascBar.base.push(t.cascade_start || today); cascBar.hovertext.push('');
-    }
-  });
-  traces.push(cascBar);
+  // 2. Forecast (with conditional colors)
+  const foreTasks = sortedTasks.filter(t => t.forecast_start && t.forecast_end);
+  if (foreTasks.length > 0) {
+    const fY = foreTasks.map(t => taskIndexMap[t.id]);
+    const fX = foreTasks.map(t => {
+        const s = new Date(t.forecast_start);
+        const e = new Date(t.forecast_end);
+        const diff = e - s;
+        return isNaN(diff) || diff < 0 ? 0 : diff;
+    });
+    traces.push({
+      type: 'bar', orientation: 'h',
+      y: fY,
+      x: fX,
+      base: foreTasks.map(t => t.forecast_start),
+      marker: { color: foreTasks.map(t => t.critical ? '#e76f51' : '#58a6ff') },
+      name: 'Forecast',
+      hovertext: foreTasks.map(t => `<b>${t.name}</b><br>Forecast: ${t.forecast_start} → ${t.forecast_end}<br>Status: ${t.status} (${t.percent}%)`),
+      hoverinfo: 'text',
+      width: 0.3
+    });
+  }
 
-  const actBar = {
-    type: 'bar', orientation: 'h', y: actY, x: [], base: [], width: 0.14, 
-    marker: {color: '#3fb950'}, name: 'Actual', hovertext: [], hoverinfo: 'text'
-  };
-  sortedTasks.forEach(t => {
-    if (t.actual_start && t.actual_finish) {
-      const s = new Date(t.actual_start);
-      const e = new Date(t.actual_finish);
-      actBar.x.push((e - s) * 1);
-      actBar.base.push(t.actual_start);
-      actBar.hovertext.push(`<b>${t.name}</b><br>Actual: ${t.actual_start} → ${t.actual_finish}`);
-    } else {
-      actBar.x.push(0); actBar.base.push(t.actual_start || today); actBar.hovertext.push('');
-    }
-  });
-  traces.push(actBar);
+  // 3. Cascade
+  addTrack('Cascade (dependency)', '#f0883e', 0.18, 0.24,
+    t => t.cascade_start && t.cascade_end && (t.cascade_start !== t.forecast_start || t.cascade_end !== t.forecast_end),
+    t => t.cascade_start,
+    t => t.cascade_end,
+    t => `<b>${t.name}</b><br>Cascade: ${t.cascade_start} → ${t.cascade_end}`
+  );
+
+  // 4. Actual
+  const actTasks = sortedTasks.filter(t => t.actual_start && t.actual_finish);
+  if (actTasks.length > 0) {
+    const aY = actTasks.map(t => taskIndexMap[t.id] + 0.24);
+    const aX = actTasks.map(t => {
+        const s = new Date(t.actual_start);
+        const e = new Date(t.actual_finish);
+        const diff = e - s;
+        return isNaN(diff) || diff < 0 ? 0 : diff;
+    });
+    traces.push({
+      type: 'bar', orientation: 'h',
+      y: aY,
+      x: aX,
+      base: actTasks.map(t => t.actual_start),
+      marker: { color: '#3fb950' },
+      name: 'Actual',
+      hovertext: actTasks.map(t => `<b>${t.name}</b><br>Actual: ${t.actual_start} → ${t.actual_finish}`),
+      hoverinfo: 'text',
+      width: 0.18
+    });
+  }
+
+  // Dummy traces for legend
+  traces.push({ type: 'bar', orientation: 'h', y: [null], x: [null], marker: {color: '#4a525c'}, name: 'Baseline', showlegend: true });
+  traces.push({ type: 'bar', orientation: 'h', y: [null], x: [null], marker: {color: '#58a6ff'}, name: 'Forecast', showlegend: true });
+  traces.push({ type: 'bar', orientation: 'h', y: [null], x: [null], marker: {color: '#e76f51'}, name: 'Forecast (critical)', showlegend: true });
+  traces.push({ type: 'bar', orientation: 'h', y: [null], x: [null], marker: {color: '#f0883e'}, name: 'Cascade', showlegend: true });
+  traces.push({ type: 'bar', orientation: 'h', y: [null], x: [null], marker: {color: '#3fb950'}, name: 'Actual', showlegend: true });
 
   const layout = {
     paper_bgcolor: '#0e1117', plot_bgcolor: '#0e1117',

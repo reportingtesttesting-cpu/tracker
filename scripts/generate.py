@@ -95,10 +95,15 @@ def read_config(ss):
 
 
 def parse_date(v):
+    if not v: return None
+    v = str(v)[:10]
     try:
-        return datetime.strptime(str(v)[:10], "%Y-%m-%d").date()
+        return datetime.strptime(v, "%Y-%m-%d").date()
     except Exception:
-        return None
+        try:
+            return datetime.strptime(v, "%m/%d/%Y").date()
+        except Exception:
+            return None
 
 
 def build_maps(people_df):
